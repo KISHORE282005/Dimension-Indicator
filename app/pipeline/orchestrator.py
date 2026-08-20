@@ -30,6 +30,7 @@ from app.models.schemas import (
     DetailView,
     CriticalCharacteristic,
     SurfaceFinishItem,
+    ToleranceItem,
     WeldingItem,
     DocumentAnalysisResult,
 )

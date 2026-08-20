@@ -14,12 +14,16 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.models.database import DatabaseManager
 from app.models.schemas import DocumentAnalysisResult
 from app.pipeline.orchestrator import PipelineOrchestrator
 from app.backend.report_generator import ReportGenerator
+from app.backend.part_routes import router as part_report_router
+from app.backend.excel_report import ExcelReportWriter
+from app.backend.legacy_adapter import build_report_from_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +41,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+
 db = DatabaseManager()
-orchestrator = PipelineOrchestrator()
 report_gen = ReportGenerator()
+
+# The legacy orchestrator loads PaddleOCR weights on construction, which would
+# add tens of seconds to server startup. Build it on first use instead.
+_orchestrator: Optional[PipelineOrchestrator] = None
+
+
+class _LazyOrchestrator:
+    """Proxies attribute access to a PipelineOrchestrator built on demand."""
+
+    def __getattr__(self, name: str):
+        global _orchestrator
+        if _orchestrator is None:
+            _orchestrator = PipelineOrchestrator()
+        return getattr(_orchestrator, name)
+
+
+orchestrator = _LazyOrchestrator()
+
+# The fixed-column part report workflow.
+app.include_router(part_report_router)
 
 # In-memory progress tracking
 _progress: dict[str, dict] = {}
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    """Serve the part report interface."""
+    return FileResponse(str(_UI_DIR / "index.html"))
 
 
 # ------------------------------------------------------------------
@@ -292,14 +323,19 @@ async def generate_excel_report(document_id: str):
     result = db.get_analysis(document_id)
     if not result:
         raise HTTPException(404, "Analysis not found")
+    # One Excel format across the whole application: the fixed nine columns.
+    # This endpoint has no input form, so every column is either read from the
+    # drawing or reported as "Not Detected".
     try:
-        xlsx_path = report_gen.generate_excel(result)
+        report = build_report_from_analysis(result)
+        xlsx_path = ExcelReportWriter().generate(report)
         return FileResponse(
             str(xlsx_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"engineering_report_{document_id[:8]}.xlsx",
         )
     except Exception as e:
+        logger.exception("Excel generation failed for %s", document_id)
         raise HTTPException(500, f"Excel generation failed: {e}")
 
 
@@ -350,3 +386,13 @@ async def delete_analysis(document_id: str):
     if db.delete_analysis(document_id):
         return {"message": "Deleted"}
     raise HTTPException(404, "Analysis not found")
+
+
+# ------------------------------------------------------------------
+# Static UI (mounted last so it cannot shadow the API routes)
+# ------------------------------------------------------------------
+
+if _UI_DIR.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
+else:  # pragma: no cover - only if the checkout is incomplete
+    logger.warning("UI directory missing: %s", _UI_DIR)

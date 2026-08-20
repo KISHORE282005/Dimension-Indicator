@@ -2,18 +2,31 @@
 *.pyc
 __pycache__/
 
-# Environment
-.env
+# Environment - holds real secrets. Never commit.
+# .env.example is committed and must contain placeholders only.
+
+.env.local
+.env.*.local
+
 
 # Python venv
-venv/
+.venv/
+
 
 # Uploads & output
-uploads/
-output/
+# Leading slash matters: these patterns are anchored to the repo root so they
+# cannot swallow same-named directories inside the package.
+/uploads/
+/output/
 
-# Downloaded models
-models/
+# Downloaded model weights.
+# WITHOUT the leading slash this also matched app/models/, silently excluding
+# the entire Python package (schemas.py, database.py, part_schemas.py) from
+# the repo and breaking a fresh clone.
+/models/
 
 # Node.js
 node_modules/
+
+# Generated test fixtures & artefacts
+/tests/fixtures/

@@ -23,8 +23,14 @@ class Settings(BaseSettings):
     OCR_USE_GPU: bool = False
     OCR_DET_DB_THRESH: float = 0.3
     OCR_DET_DB_BOX_THRESH: float = 0.5
+    # PaddleOCR's inference backend aborts on very large inputs. Measured on a
+    # 300 DPI sheet: 4096 px crashes the process outright, while 2560, 2048 and
+    # 1600 all succeed and return the same region count. 2048 keeps a 2x margin
+    # below the crash point. Pages are downscaled to this long edge before
+    # detection and the boxes are scaled back to page coordinates.
+    OCR_MAX_IMAGE_SIZE: int = 2048
 
-    GEMINI_MODEL: str = "gemini-2.5-pro"
+    GEMINI_MODEL: str = "gemini-pro-latest"
     GEMINI_API_KEY: str = ""
     GEMINI_MAX_TOKENS: int = 8192
     GEMINI_TEMPERATURE: float = 0.1

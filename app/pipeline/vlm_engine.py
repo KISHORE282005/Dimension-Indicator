@@ -6,7 +6,6 @@ All VLM outputs are clearly tagged as AI interpretations, never as verified fact
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from typing import Optional
@@ -20,6 +19,7 @@ from app.models.schemas import (
     BaseExtractedItem,
     BOMItem,
     DatumItem,
+    DetailView,
     DimensionItem,
     DrawingMetadata,
     ExtractionCategory,
@@ -30,32 +30,13 @@ from app.models.schemas import (
     SectionView,
     SourceType,
     SurfaceFinishItem,
+    ToleranceItem,
     WeldingItem,
 )
 
+from app.pipeline.gemini_client import GeminiClient
+
 logger = logging.getLogger(__name__)
-
-# Lazy client
-_genai_client = None
-
-
-def _get_gemini():
-    global _genai_client
-    if _genai_client is not None:
-        return _genai_client
-    try:
-        import google.generativeai as genai
-        if settings.GEMINI_API_KEY:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-        _genai_client = genai.GenerativeModel(settings.GEMINI_MODEL)
-        logger.info("Gemini model %s initialised", settings.GEMINI_MODEL)
-        return _genai_client
-    except ImportError:
-        logger.warning("google-generativeai not installed")
-        return None
-    except Exception as e:
-        logger.error("Failed to init Gemini: %s", e)
-        return None
 
 
 # ------------------------------------------------------------------
@@ -225,45 +206,22 @@ Only report what you can clearly see. Return ONLY valid JSON.
 class VLMEngine:
     """Vision-Language Model engine for engineering drawing interpretation."""
 
-    def __init__(self) -> None:
-        self.model = _get_gemini()
-        self.config = {
-            "temperature": settings.GEMINI_TEMPERATURE,
-            "max_output_tokens": settings.GEMINI_MAX_TOKENS,
-        }
+    def __init__(self, client: Optional[GeminiClient] = None) -> None:
+        self.client = client or GeminiClient()
 
     def is_available(self) -> bool:
-        return self.model is not None
+        return self.client.is_available()
 
-    def _image_to_part(self, image: np.ndarray) -> dict:
-        """Convert numpy image to Gemini-compatible image part."""
-        _, buf = cv2.imencode(".png", image)
-        b64 = base64.b64encode(buf).decode("utf-8")
-        return {
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": b64,
-            }
-        }
+    @property
+    def unavailable_reason(self) -> str:
+        return self.client.unavailable_reason
 
-    def _parse_json_response(self, text: str) -> dict:
-        """Extract JSON from Gemini response text."""
-        text = text.strip()
-        # Try direct parse
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # Try extracting from markdown code block
-        import re
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-        logger.warning("Failed to parse VLM JSON response")
-        return {}
+    @staticmethod
+    def _encode_image(image: np.ndarray) -> bytes:
+        ok, buf = cv2.imencode(".png", image)
+        if not ok:
+            raise ValueError("Failed to encode image for the vision model")
+        return buf.tobytes()
 
     def analyze_page(
         self,
@@ -280,22 +238,20 @@ class VLMEngine:
                 model_used="none",
             )
 
-        prompt = ENGINEERING_EXTRACTION_PROMPT.format()
-        image_part = self._image_to_part(page_image)
-        text_part = f"OCR extracted text from this page:\n```\n{ocr_text}\n```\n\nAnalyze the drawing."
+        prompt = (
+            f"OCR extracted text from this page:\n```\n{ocr_text}\n```\n\n"
+            f"{ENGINEERING_EXTRACTION_PROMPT.format()}"
+        )
 
         try:
-            response = self.model.generate_content(
-                [image_part, text_part, prompt],
-                generation_config=self.config,
+            parsed = self.client.generate_json(
+                prompt, images=[self._encode_image(page_image)]
             )
-            raw_text = response.text
-            parsed = self._parse_json_response(raw_text)
             items = self._parsed_to_items(parsed, page_number)
 
             return AIInterpretation(
                 page_number=page_number,
-                interpretation_text=raw_text,
+                interpretation_text=json.dumps(parsed)[:4000],
                 extracted_items=items,
                 confidence=self._compute_avg_confidence(parsed),
                 model_used=settings.GEMINI_MODEL,
@@ -320,15 +276,15 @@ class VLMEngine:
         if not self.is_available():
             return {"detected_type": "unknown", "interpretation": "VLM not available", "confidence": 0.0}
 
-        image_part = self._image_to_part(region_image)
-        text_part = f"Context: {context}\n\nAnalyze this engineering drawing region."
+        prompt = (
+            f"Context: {context}\n\nAnalyze this engineering drawing region.\n\n"
+            f"{VISION_ANALYSIS_PROMPT}"
+        )
 
         try:
-            response = self.model.generate_content(
-                [image_part, text_part, VISION_ANALYSIS_PROMPT],
-                generation_config=self.config,
+            return self.client.generate_json(
+                prompt, images=[self._encode_image(region_image)]
             )
-            return self._parse_json_response(response.text)
         except Exception as e:
             logger.error("Region analysis failed: %s", e)
             return {"detected_type": "unknown", "interpretation": str(e), "confidence": 0.0}

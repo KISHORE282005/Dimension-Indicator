@@ -22,7 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 class ProcessedPage:
-    """Container for a single processed page."""
+    """Container for a single processed page.
+
+    Two renderings are kept deliberately:
+
+    - ``original_image``  the clean render straight from the PDF. This is what
+      the vision model sees. Binarising or sharpening a drawing before sending
+      it to a VLM destroys thin extension lines, centre lines and light GD&T
+      glyphs, which is exactly the detail the model is being asked to read.
+    - ``processed_image``  contrast-normalised and binarised, which is what
+      helps a classical OCR detector find text boxes.
+    """
 
     def __init__(
         self,
@@ -51,6 +61,31 @@ class ProcessedPage:
         buf = io.BytesIO()
         pil.save(buf, format=fmt)
         return buf.getvalue()
+
+    def to_vlm_bytes(self, max_edge: int = 2048, fmt: str = "PNG") -> bytes:
+        """Encode the clean render for a vision model.
+
+        Downscaled with INTER_AREA so line work stays continuous, and capped so
+        a 300 DPI A1 sheet does not blow past the request size limit.
+        """
+        img = self.original_image
+        h, w = img.shape[:2]
+        if max(h, w) > max_edge:
+            scale = max_edge / max(h, w)
+            img = cv2.resize(
+                img, (max(int(w * scale), 1), max(int(h * scale), 1)),
+                interpolation=cv2.INTER_AREA,
+            )
+        ext = ".png" if fmt.upper() == "PNG" else ".jpg"
+        params = [] if ext == ".png" else [cv2.IMWRITE_JPEG_QUALITY, 92]
+        ok, buf = cv2.imencode(ext, img, params)
+        if not ok:
+            raise ValueError(f"Failed to encode page {self.page_number} as {fmt}")
+        return buf.tobytes()
+
+    def has_text_layer(self) -> bool:
+        """True when the PDF carries real vector text for this page."""
+        return any(str(b.get("text", "")).strip() for b in self.text_blocks)
 
 
 class DocumentProcessor:
@@ -99,9 +134,14 @@ class DocumentProcessor:
             )
             if pix.n == 4:
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
+            elif pix.n == 1:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
             else:
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
 
+            # A 300 DPI A1 sheet renders to ~10000 px on the long edge. Cap it
+            # before preprocessing or the filters take minutes per page.
+            img_array = self._resize_if_needed(img_array)
             processed = self._preprocess_image(img_array)
 
             # Extract text blocks with positions
@@ -117,18 +157,26 @@ class DocumentProcessor:
                                 "size": span.get("size", 0),
                             })
 
+            page_h, page_w = img_array.shape[:2]
             pages.append(
                 ProcessedPage(
                     page_number=idx + 1,
                     original_image=img_array,
                     processed_image=processed,
-                    width=pix.width,
-                    height=pix.height,
-                    dpi=self.dpi,
+                    width=page_w,
+                    height=page_h,
+                    dpi=self.dpi * (page_w / pix.width) if pix.width else self.dpi,
                     text_blocks=text_blocks,
                 )
             )
-            logger.info("Rendered page %d (%dx%d)", idx + 1, pix.width, pix.height)
+            logger.info(
+                "Rendered page %d/%d (%dx%d, %d text spans)",
+                idx + 1,
+                len(doc),
+                page_w,
+                page_h,
+                len(text_blocks),
+            )
 
         doc.close()
         return pages
@@ -161,23 +209,33 @@ class DocumentProcessor:
     # ------------------------------------------------------------------
 
     def _preprocess_image(self, img: np.ndarray) -> np.ndarray:
-        """Full preprocessing pipeline: grayscale, denoise, sharpen, threshold."""
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        denoised = cv2.fastNlMeansDenoising(gray, h=10)
-        sharpened = self._sharpen(denoised)
-        binary = self._adaptive_threshold(sharpened)
-        # Convert back to 3-channel for downstream consumers
-        return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        """Prepare a page for the OCR text detector.
 
-    @staticmethod
-    def _sharpen(gray: np.ndarray) -> np.ndarray:
-        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
-        return cv2.filter2D(gray, -1, kernel)
+        Tuned for line drawings rather than photographs of documents:
+
+        - CLAHE lifts faint hand-added or low-contrast annotation text without
+          also amplifying the paper texture across the whole sheet.
+        - A 3x3 median removes speckle from scans while leaving 1 px drawing
+          lines intact, unlike a Gaussian blur.
+        - Adaptive threshold uses a 25 px window. The 15 px window used before
+          is narrower than the stroke width of title-block text at 300 DPI, so
+          it hollowed out thick glyphs into outlines.
+
+        The previous chain also ran an unsharp kernel with a centre weight of 9
+        before thresholding, which turned every drawing line into a black/white
+        ringing pair and manufactured phantom text boxes for the detector.
+        """
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+        equalised = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        denoised = cv2.medianBlur(equalised, 3)
+        binary = self._adaptive_threshold(denoised)
+        # Downstream consumers (PaddleOCR, crops) expect 3-channel input.
+        return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 
     @staticmethod
     def adaptive_threshold(gray: np.ndarray) -> np.ndarray:
         return cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 8,
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 10,
         )
 
     def _adaptive_threshold(self, gray: np.ndarray) -> np.ndarray:

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Engineering Drawing Analysis</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128208;</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div>
+    <h1>AI Engineering Drawing Analysis &amp; Excel Report Generator</h1>
+    <p class="sub">Full multi-page PDF analysis &middot; traceable extraction &middot; fixed-format Excel output</p>
+  </div>
+</header>
+
+<main>
+
+  <div id="systemBanners"></div>
+
+  <!-- 1. PDF UPLOAD -->
+  <section class="card">
+    <header>
+      <span class="step">1</span>
+      <h2>Upload Engineering Drawing</h2>
+      <span class="hint">PDF, PNG, JPG, TIFF &middot; every page is analysed</span>
+    </header>
+    <div class="body">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button"
+           aria-label="Upload an engineering drawing">
+        <div class="icon">&#128193;</div>
+        <div class="primary">Drop your drawing here, or click to browse</div>
+        <div class="secondary">Multi-page PDFs are processed page by page &mdash; no page is skipped</div>
+      </div>
+      <input type="file" id="fileInput" class="hidden"
+             accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
+      <div id="fileInfo" class="fileinfo hidden">
+        <div>
+          <div class="name" id="fileName"></div>
+          <div class="meta" id="fileMeta"></div>
+        </div>
+        <button class="btn-ghost" id="clearFile" type="button">Remove</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. INPUT DATA -->
+  <section class="card">
+    <header>
+      <span class="step">2</span>
+      <h2>Input Data</h2>
+      <span class="hint">Optional &mdash; these ten fields are the fixed columns of the Excel report</span>
+    </header>
+    <div class="body">
+      <div class="banner info">
+        <strong>Leave this grid completely empty</strong> to have the parts read
+        straight off the drawing &mdash; from its parts list if it has one, otherwise
+        from the title block. Fill rows in only to override what the drawing says: anything you type is
+        kept exactly as entered, and if the drawing disagrees the report flags the
+        difference instead of overwriting you. On any row you do fill in,
+        <strong style="display:inline">PART NO is required</strong> &mdash; it is how
+        drawing data is matched to that row.
+      </div>
+
+      <div class="grid-wrap">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th style="width:34px"></th>
+              <th style="width:60px">S No</th>
+              <th class="req" style="width:110px">PART NO</th>
+              <th style="width:250px">DESCRIPTION</th>
+              <th style="width:130px">DWG NO</th>
+              <th style="width:110px">WEIGHT (IN KG)</th>
+              <th style="width:100px">THICKNESS</th>
+              <th style="width:150px">PROCESS</th>
+              <th style="width:100px">LENGTH (mm)</th>
+              <th style="width:100px">WIDTH (mm)</th>
+              <th style="width:100px">HEIGHT (mm)</th>
+              <th style="width:40px"></th>
+            </tr>
+          </thead>
+          <tbody id="partRows"></tbody>
+        </table>
+      </div>
+
+      <div class="grid-toolbar">
+        <button class="btn-ghost" id="addRow" type="button">+ Add Part</button>
+        <span class="note" id="rowCount"></span>
+        <span class="spacer"></span>
+        <div class="toggles">
+          <label><input type="checkbox" id="useOcr" checked> Run OCR</label>
+          <label><input type="checkbox" id="useVlm" checked> Run drawing analysis</label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. ANALYZE -->
+  <section class="card">
+    <header>
+      <span class="step">3</span>
+      <h2>Analyze Drawing</h2>
+    </header>
+    <div class="body">
+      <div class="download-row">
+        <button class="btn-primary btn-lg" id="analyzeBtn" type="button" disabled>
+          Analyze Drawing
+        </button>
+        <span class="desc" id="analyzeHint">Upload a drawing to begin.</span>
+      </div>
+      <div id="analyzeError"></div>
+    </div>
+  </section>
+
+  <!-- 4. PROGRESS -->
+  <section class="card hidden" id="progressCard">
+    <header>
+      <span class="step">4</span>
+      <h2>Processing</h2>
+      <span class="hint" id="progressPct">0%</span>
+    </header>
+    <div class="body">
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-row">
+        <span class="stage" id="progressStage">Starting</span>
+        <span class="detail" id="progressDetail"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <div id="results" class="hidden">
+
+    <div id="resultBanners"></div>
+
+    <!-- 5. EXTRACTED DRAWING INFORMATION -->
+    <section class="card">
+      <header>
+        <span class="step">5</span>
+        <h2>Extracted Drawing Information</h2>
+        <span class="hint" id="findingsSummary"></span>
+      </header>
+      <div class="body">
+        <div class="stats" id="runStats"></div>
+        <div class="filters" id="findingFilters"></div>
+        <div class="scroll-y">
+          <table class="findings">
+            <thead>
+              <tr>
+                <th style="width:52px">Page</th>
+                <th style="width:110px">Category</th>
+                <th style="width:130px">Part No</th>
+                <th style="width:230px">Value</th>
+                <th>Detail</th>
+                <th style="width:80px">Conf.</th>
+                <th style="width:66px">Source</th>
+              </tr>
+            </thead>
+            <tbody id="findingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. FINAL REPORT PREVIEW -->
+    <section class="card">
+      <header>
+        <span class="step">6</span>
+        <h2>Final Report Preview</h2>
+        <span class="hint">Exactly the columns that will be written to Excel</span>
+      </header>
+      <div class="body">
+        <div class="grid-wrap">
+          <table class="report">
+            <thead><tr id="reportHead"></tr></thead>
+            <tbody id="reportBody"></tbody>
+          </table>
+        </div>
+        <div class="legend">
+          <span><i class="swatch" style="background:#fff"></i> As entered by you</span>
+          <span><i class="swatch" style="background:var(--ok-bg)"></i> Filled in from the drawing</span>
+          <span><i class="swatch" style="background:var(--warn-bg)"></i> Differs from the drawing (your value kept)</span>
+          <span><i class="swatch" style="background:var(--err-bg)"></i> Not detected</span>
+        </div>
+        <div id="rowWarnings"></div>
+      </div>
+    </section>
+
+    <!-- 7. DOWNLOAD -->
+    <section class="card">
+      <header>
+        <span class="step">7</span>
+        <h2>Download Excel Report</h2>
+      </header>
+      <div class="body">
+        <div class="download-row">
+          <button class="btn-accent btn-lg" id="downloadBtn" type="button">
+            &#11015; Download Excel Report
+          </button>
+          <span class="desc">
+            Four sheets: <strong>Report</strong> (the ten fixed columns, frozen header,
+            filters, print-ready), <strong>Traceability</strong> (source, page and
+            confidence for every cell), <strong>Drawing Information</strong> (everything
+            read off the drawing) and <strong>Analysis Log</strong> (page-by-page record).
+          </span>
+        </div>
+        <div id="downloadError"></div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<script src="/ui/app.js"></script>
+</body>
+</html>
