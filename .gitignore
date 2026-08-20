@@ -4,7 +4,7 @@ __pycache__/
 
 # Environment - holds real secrets. Never commit.
 # .env.example is committed and must contain placeholders only.
-
+.env
 .env.local
 .env.*.local
 
