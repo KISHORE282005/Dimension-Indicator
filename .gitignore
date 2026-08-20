@@ -1,0 +1,19 @@
+*.cmd
+*.pyc
+__pycache__/
+
+# Environment
+.env
+
+# Python venv
+venv/
+
+# Uploads & output
+uploads/
+output/
+
+# Downloaded models
+models/
+
+# Node.js
+node_modules/
