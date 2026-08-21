@@ -14,7 +14,6 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.models.database import DatabaseManager
@@ -41,7 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 db = DatabaseManager()
 report_gen = ReportGenerator()
@@ -72,8 +71,8 @@ _progress: dict[str, dict] = {}
 
 @app.get("/", include_in_schema=False)
 async def index():
-    """Serve the part report interface."""
-    return FileResponse(str(_UI_DIR / "index.html"))
+    """Serve the React application."""
+    return FileResponse(str(_FRONTEND_DIST / "index.html"))
 
 
 # ------------------------------------------------------------------
@@ -389,10 +388,26 @@ async def delete_analysis(document_id: str):
 
 
 # ------------------------------------------------------------------
-# Static UI (mounted last so it cannot shadow the API routes)
+# Static UI
 # ------------------------------------------------------------------
 
-if _UI_DIR.is_dir():
-    app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
-else:  # pragma: no cover - only if the checkout is incomplete
-    logger.warning("UI directory missing: %s", _UI_DIR)
+if not (_FRONTEND_DIST / "index.html").is_file():
+    logger.warning(
+        "Frontend build missing: %s — run `npm run build` in the frontend folder",
+        _FRONTEND_DIST,
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    """Serve the React app for client-side routes (e.g. /history).
+
+    Registered last so it can never shadow the API routes. API paths are
+    excluded so unknown endpoints still return 404 JSON.
+    """
+    if full_path.startswith("api/") or full_path == "api":
+        raise HTTPException(404, "Not found")
+    asset = _FRONTEND_DIST / full_path
+    if asset.is_file():
+        return FileResponse(str(asset))
+    return FileResponse(str(_FRONTEND_DIST / "index.html"))

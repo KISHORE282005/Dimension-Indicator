@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useDropzone } from "react-dropzone";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -8,6 +9,7 @@ import {
   Loader2,
   Play,
   RotateCcw,
+  UploadCloud,
 } from "lucide-react";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { getExcelUrl, getPdfUrl } from "../services/api";
@@ -35,6 +37,7 @@ export default function UploadPage() {
     stage,
     error,
     result,
+    handleFiles,
     runAnalysis,
     reset,
   } = useWorkspace();
@@ -49,6 +52,22 @@ export default function UploadPage() {
     const t = window.setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => window.clearInterval(t);
   }, [phase]);
+
+  const onDrop = useCallback(
+    (files: File[]) => handleFiles(files),
+    [handleFiles]
+  );
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "application/pdf": [".pdf"],
+      "image/*": [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"],
+    },
+    maxFiles: 1,
+    multiple: false,
+    disabled: phase === "uploading" || phase === "analyzing",
+  });
 
   const summaryEntries = Object.entries(result?.summary ?? {})
     .filter(([, v]) => v > 0)
@@ -65,42 +84,33 @@ export default function UploadPage() {
         </p>
       </header>
 
-      {phase === "idle" && (
-        <div className="feature-grid">
-          <div className="workspace-card feature-card">
-            <span className="feature-num">1</span>
-            <h3>Upload</h3>
-            <p>
-              Drag &amp; drop your drawing into the sidebar — PDF or image,
-              single or multi-page.
-            </p>
-          </div>
-          <div className="workspace-card feature-card">
-            <span className="feature-num">2</span>
-            <h3>Analyze</h3>
-            <p>
-              OCR and AI vision read every page and extract dimensions,
-              tolerances, GD&amp;T and notes.
-            </p>
-          </div>
-          <div className="workspace-card feature-card">
-            <span className="feature-num">3</span>
-            <h3>Download</h3>
-            <p>
-              Review the summary here and download the complete analysis report
-              as Excel or PDF.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {phase === "uploading" && (
-        <div className="workspace-card status-card">
-          <Loader2 size={22} className="spin" />
-          <div>
-            <h3>Uploading drawing...</h3>
-            <p>{stage}</p>
-          </div>
+      {(phase === "idle" || phase === "uploading") && (
+        <div
+          {...getRootProps()}
+          className={`dropzone-main ${isDragActive ? "active" : ""} ${
+            phase === "uploading" ? "disabled" : ""
+          }`}
+        >
+          <input {...getInputProps()} />
+          {phase === "uploading" ? (
+            <>
+              <Loader2 size={34} className="spin accent" />
+              <div className="dz-primary">{stage || "Uploading..."}</div>
+            </>
+          ) : (
+            <>
+              <UploadCloud size={34} strokeWidth={1.5} />
+              <div className="dz-primary">
+                {isDragActive
+                  ? "Drop the file here..."
+                  : "Drag & drop your drawing here, or click to browse"}
+              </div>
+              <div className="dz-secondary">
+                Supports PDF, JPG, PNG, TIFF, BMP, WebP — every page is
+                analysed
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -162,60 +172,55 @@ export default function UploadPage() {
       )}
 
       {phase === "done" && result && documentId && (
-        <>
-          <div className="workspace-card">
-            <div className="status-banner success">
-              <CheckCircle2 size={18} />
-              <span>
-                Analysis complete for <strong>{result.filename}</strong> —{" "}
-                {result.total_pages} page{result.total_pages === 1 ? "" : "s"} in{" "}
-                {result.processing_time.toFixed(1)}s
-                {result.is_valid === true && " · validation passed"}
-                {result.is_valid === false &&
-                  ` · ${result.issues_count} issue${
-                    result.issues_count === 1 ? "" : "s"
-                  } flagged`}
-              </span>
-            </div>
-
-            {summaryEntries.length > 0 && (
-              <div className="result-stats">
-                {summaryEntries.map(([key, count]) => (
-                  <div key={key} className="result-stat">
-                    <span className="num">{count}</span>
-                    <span className="lbl">{prettyLabel(key)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="download-actions">
-              <a
-                href={getExcelUrl(documentId)}
-                download
-                className="btn btn-primary btn-lg"
-              >
-                <Download size={16} /> Download Analysis
-              </a>
-              <a
-                href={getPdfUrl(documentId)}
-                download
-                className="btn btn-secondary"
-              >
-                <FileText size={15} /> PDF Report
-              </a>
-              <Link
-                to={`/analysis/${documentId}`}
-                className="btn btn-secondary"
-              >
-                View Full Report
-              </Link>
-              <button className="btn btn-ghost" onClick={reset}>
-                <RotateCcw size={14} /> New Upload
-              </button>
-            </div>
+        <div className="workspace-card">
+          <div className="status-banner success">
+            <CheckCircle2 size={18} />
+            <span>
+              Analysis complete for <strong>{result.filename}</strong> —{" "}
+              {result.total_pages} page{result.total_pages === 1 ? "" : "s"} in{" "}
+              {result.processing_time.toFixed(1)}s
+              {result.is_valid === true && " · validation passed"}
+              {result.is_valid === false &&
+                ` · ${result.issues_count} issue${
+                  result.issues_count === 1 ? "" : "s"
+                } flagged`}
+            </span>
           </div>
-        </>
+
+          {summaryEntries.length > 0 && (
+            <div className="result-stats">
+              {summaryEntries.map(([key, count]) => (
+                <div key={key} className="result-stat">
+                  <span className="num">{count}</span>
+                  <span className="lbl">{prettyLabel(key)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="download-actions">
+            <a
+              href={getExcelUrl(documentId)}
+              download
+              className="btn btn-primary btn-lg"
+            >
+              <Download size={16} /> Download Analysis
+            </a>
+            <a
+              href={getPdfUrl(documentId)}
+              download
+              className="btn btn-secondary"
+            >
+              <FileText size={15} /> PDF Report
+            </a>
+            <Link to={`/analysis/${documentId}`} className="btn btn-secondary">
+              View Full Report
+            </Link>
+            <button className="btn btn-ghost" onClick={reset}>
+              <RotateCcw size={14} /> New Upload
+            </button>
+          </div>
+        </div>
       )}
 
       {phase === "error" && error && (
