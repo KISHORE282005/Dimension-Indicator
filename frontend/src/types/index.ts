@@ -52,6 +52,7 @@ export interface ToleranceItem extends ExtractedItem {
   criticality: string;
   mode_of_control: string;
   mode_of_inspection: string;
+  unit: string | null;
 }
 
 export interface HoleItem extends ExtractedItem {
