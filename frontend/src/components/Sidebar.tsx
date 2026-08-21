@@ -1,13 +1,31 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { History, Ruler, UploadCloud } from "lucide-react";
+import {
+  Download,
+  FileSearch,
+  History,
+  Ruler,
+  Table2,
+  UploadCloud,
+} from "lucide-react";
 import { useWorkspace } from "../context/WorkspaceContext";
 
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { phase, fileName } = useWorkspace();
+  const { phase, fileName, progress } = useWorkspace();
 
   const busy = phase === "uploading" || phase === "analyzing";
+  const done = phase === "done";
+
+  const goToSection = (id: string) => {
+    if (location.pathname !== "/") navigate("/");
+    window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+  };
 
   return (
     <aside className="app-sidebar">
@@ -53,6 +71,30 @@ export default function Sidebar() {
           Multi-page PDFs are processed page by page — no page is skipped.
         </p>
       </div>
+
+      {done && (
+        <nav className="sidebar-nav results-nav">
+          <span className="nav-group-label">Analysis Results</span>
+          <button onClick={() => goToSection("extracted-info")}>
+            <FileSearch size={16} /> Extracted Diagram Information
+          </button>
+          <button onClick={() => goToSection("final-report")}>
+            <Table2 size={16} /> Final Report
+          </button>
+          <button onClick={() => goToSection("download")}>
+            <Download size={16} /> Download
+          </button>
+        </nav>
+      )}
+
+      {phase === "analyzing" && (
+        <div className="sidebar-progress-wrap">
+          <span className="nav-group-label">Analyzing… {progress}%</span>
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
 
       <div className="sidebar-footer">
         AI-powered extraction of dimensions, tolerances, GD&amp;T and more.

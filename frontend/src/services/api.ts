@@ -7,9 +7,62 @@ import type {
   DetectedIssue,
   ValidationResult,
   HistoryItem,
+  PartUploadResponse,
+  PartAnalyzeResponse,
+  PartJobProgress,
+  PartReportResult,
 } from "../types";
 
 const api = axios.create({ baseURL: "/api" });
+
+// ---------------------------------------------------------------------------
+// Part report workflow (fixed 10-column Excel format)
+// ---------------------------------------------------------------------------
+
+export const uploadPartReport = async (
+  file: File
+): Promise<PartUploadResponse> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<PartUploadResponse>(
+    "/part-report/upload",
+    formData
+  );
+  return data;
+};
+
+export const startPartAnalysis = async (
+  documentId: string,
+  useVlm = true,
+  useOcr = true
+): Promise<PartAnalyzeResponse> => {
+  const { data } = await api.post<PartAnalyzeResponse>("/part-report/analyze", {
+    document_id: documentId,
+    parts: [],
+    use_vlm: useVlm,
+    use_ocr: useOcr,
+  });
+  return data;
+};
+
+export const getPartProgress = async (
+  jobId: string
+): Promise<PartJobProgress> => {
+  const { data } = await api.get<PartJobProgress>(
+    `/part-report/progress/${jobId}`
+  );
+  return data;
+};
+
+export const getPartResult = async (
+  jobId: string
+): Promise<PartReportResult> => {
+  const { data } = await api.get<PartReportResult>(`/part-report/result/${jobId}`);
+  return data;
+};
+
+export const getPartExcelUrl = (jobId: string) =>
+  `/api/part-report/excel/${jobId}`;
 
 export const uploadFile = async (file: File): Promise<UploadResponse> => {
   const formData = new FormData();

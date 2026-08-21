@@ -242,3 +242,100 @@ export interface HistoryItem {
   warnings_count: number;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Part report workflow (fixed 10-column Excel format)
+// ---------------------------------------------------------------------------
+
+export interface PartUploadResponse {
+  document_id: string;
+  filename: string;
+  size_bytes: number;
+  page_count: number;
+  stored_as: string;
+}
+
+export interface PartAnalyzeResponse {
+  job_id: string;
+  status: string;
+  parts: number;
+  mode: "supplied" | "discovery";
+}
+
+export interface PartJobProgress {
+  job_id: string;
+  status: "queued" | "running" | "complete" | "error";
+  stage: string;
+  progress: number;
+  detail: string;
+  error: string | null;
+  excel_path: string | null;
+}
+
+export type CellSource = "user" | "drawing" | "not_detected";
+
+export type CellStatus =
+  | "user_only"
+  | "confirmed"
+  | "conflict"
+  | "filled"
+  | "missing";
+
+export interface ReportCell {
+  column: string;
+  value: string;
+  source: CellSource;
+  status: CellStatus;
+  confidence: number;
+  page_references: number[];
+  user_value: string | null;
+  drawing_value: string | null;
+  note: string | null;
+}
+
+export interface DrawingFinding {
+  category: string;
+  value: string;
+  detail: string | null;
+  page_number: number;
+  part_no?: string | null;
+  confidence: number;
+  source: string;
+}
+
+export interface PartReportTableRow {
+  part_no: string;
+  values: string[];
+  cells: Record<string, ReportCell>;
+  warnings: string[];
+  discovered: boolean;
+}
+
+export interface PartReportTable {
+  columns: string[];
+  rows: PartReportTableRow[];
+}
+
+export interface PartReportResult {
+  job_id: string;
+  document_id: string;
+  filename: string;
+  total_pages: number;
+  pages_analyzed: number;
+  processing_time_seconds: number;
+  ocr_engine: string;
+  vlm_model: string;
+  vlm_available: boolean;
+  discovery_mode: boolean;
+  table: PartReportTable;
+  findings: DrawingFinding[];
+  unmatched_findings: DrawingFinding[];
+  warnings: string[];
+  errors: string[];
+  row_warnings: Record<string, string[]>;
+  stats: {
+    conflicts: number;
+    filled_from_drawing: number;
+    not_detected: number;
+  };
+}

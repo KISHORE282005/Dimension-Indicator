@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,7 +11,8 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { useWorkspace } from "../context/WorkspaceContext";
-import { getExcelUrl, getPdfUrl } from "../services/api";
+import { getPartExcelUrl } from "../services/api";
+import type { CellStatus, DrawingFinding } from "../types";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -20,21 +20,30 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function prettyLabel(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+function cellClass(status: CellStatus): string {
+  switch (status) {
+    case "filled":
+      return "cell-filled";
+    case "conflict":
+      return "cell-conflict";
+    case "missing":
+      return "cell-missing";
+    default:
+      return "";
+  }
 }
 
 export default function UploadPage() {
-  const navigate = useNavigate();
   const {
     phase,
     fileName,
     fileSize,
+    pageCount,
     documentId,
+    jobId,
     progress,
     stage,
+    detail,
     error,
     result,
     handleFiles,
@@ -43,6 +52,7 @@ export default function UploadPage() {
   } = useWorkspace();
   const [useVlm, setUseVlm] = useState(true);
   const [elapsed, setElapsed] = useState(0);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   useEffect(() => {
     if (phase !== "analyzing") {
@@ -69,9 +79,16 @@ export default function UploadPage() {
     disabled: phase === "uploading" || phase === "analyzing",
   });
 
-  const summaryEntries = Object.entries(result?.summary ?? {})
-    .filter(([, v]) => v > 0)
-    .slice(0, 8);
+  const categories = useMemo(() => {
+    if (!result) return [];
+    return Array.from(new Set(result.findings.map((f) => f.category))).sort();
+  }, [result]);
+
+  const filteredFindings: DrawingFinding[] = useMemo(() => {
+    if (!result) return [];
+    if (categoryFilter === "all") return result.findings;
+    return result.findings.filter((f) => f.category === categoryFilter);
+  }, [result, categoryFilter]);
 
   return (
     <div className="page upload-page">
@@ -79,8 +96,9 @@ export default function UploadPage() {
         <h1>Engineering Drawing Analysis</h1>
         <p>
           Upload an engineering diagram to automatically extract dimensions,
-          tolerances, GD&amp;T callouts, holes, welding symbols, BOM data and
-          more — then download the full analysis report.
+          tolerances, GD&amp;T callouts and part data — then generate your
+          report in the fixed Excel format: S No, PART NO, DESCRIPTION, DWG NO,
+          WEIGHT (IN KG), THICKNESS, PROCESS, LENGTH, WIDTH and HEIGHT.
         </p>
       </header>
 
@@ -120,7 +138,10 @@ export default function UploadPage() {
             <FileText size={26} className="file-icon" />
             <div className="file-info">
               <strong>{fileName}</strong>
-              <span>{formatSize(fileSize)} &middot; ready to analyze</span>
+              <span>
+                {formatSize(fileSize)} &middot; {pageCount} page
+                {pageCount === 1 ? "" : "s"} &middot; ready to analyze
+              </span>
             </div>
             <button className="btn btn-secondary" onClick={reset}>
               <RotateCcw size={14} /> Remove
@@ -133,7 +154,7 @@ export default function UploadPage() {
               checked={useVlm}
               onChange={(e) => setUseVlm(e.target.checked)}
             />
-            <span>Enable AI Vision Analysis (Gemini 2.5 Pro)</span>
+            <span>Enable AI Vision Analysis (Gemini)</span>
           </label>
 
           <div className="analyze-actions">
@@ -144,7 +165,8 @@ export default function UploadPage() {
               <Play size={16} /> Run Analysis
             </button>
             <span className="action-hint">
-              Extraction runs on every page of the document.
+              The report is generated in the fixed 10-column format after
+              analysis.
             </span>
           </div>
         </div>
@@ -157,9 +179,11 @@ export default function UploadPage() {
             <div className="file-info">
               <strong>Analyzing {fileName}</strong>
               <span>
-                {stage || "Processing"} &middot; {elapsed}s elapsed
+                {stage || "Processing"}
+                {detail ? ` — ${detail}` : ""} &middot; {elapsed}s elapsed
               </span>
             </div>
+            <span className="progress-pct">{progress}%</span>
           </div>
           <div className="progress-bar analyzing">
             <div className="progress-fill" style={{ width: `${progress}%` }} />
@@ -171,58 +195,6 @@ export default function UploadPage() {
         </div>
       )}
 
-      {phase === "done" && result && documentId && (
-        <div className="workspace-card">
-          <div className="status-banner success">
-            <CheckCircle2 size={18} />
-            <span>
-              Analysis complete for <strong>{result.filename}</strong> —{" "}
-              {result.total_pages} page{result.total_pages === 1 ? "" : "s"} in{" "}
-              {result.processing_time.toFixed(1)}s
-              {result.is_valid === true && " · validation passed"}
-              {result.is_valid === false &&
-                ` · ${result.issues_count} issue${
-                  result.issues_count === 1 ? "" : "s"
-                } flagged`}
-            </span>
-          </div>
-
-          {summaryEntries.length > 0 && (
-            <div className="result-stats">
-              {summaryEntries.map(([key, count]) => (
-                <div key={key} className="result-stat">
-                  <span className="num">{count}</span>
-                  <span className="lbl">{prettyLabel(key)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="download-actions">
-            <a
-              href={getExcelUrl(documentId)}
-              download
-              className="btn btn-primary btn-lg"
-            >
-              <Download size={16} /> Download Analysis
-            </a>
-            <a
-              href={getPdfUrl(documentId)}
-              download
-              className="btn btn-secondary"
-            >
-              <FileText size={15} /> PDF Report
-            </a>
-            <Link to={`/analysis/${documentId}`} className="btn btn-secondary">
-              View Full Report
-            </Link>
-            <button className="btn btn-ghost" onClick={reset}>
-              <RotateCcw size={14} /> New Upload
-            </button>
-          </div>
-        </div>
-      )}
-
       {phase === "error" && error && (
         <div className="workspace-card">
           <div className="status-banner error">
@@ -230,19 +202,204 @@ export default function UploadPage() {
             <span>{error}</span>
           </div>
           <div className="download-actions">
-            {documentId ? (
+            {documentId && (
               <button
                 className="btn btn-primary"
                 onClick={() => runAnalysis(useVlm)}
               >
                 <RotateCcw size={14} /> Retry Analysis
               </button>
-            ) : null}
+            )}
             <button className="btn btn-secondary" onClick={reset}>
               Start Over
             </button>
           </div>
         </div>
+      )}
+
+      {phase === "done" && result && jobId && (
+        <>
+          <div className="workspace-card">
+            <div className="status-banner success">
+              <CheckCircle2 size={18} />
+              <span>
+                Analysis complete for <strong>{result.filename}</strong> —{" "}
+                {result.pages_analyzed} of {result.total_pages} page
+                {result.total_pages === 1 ? "" : "s"} in{" "}
+                {result.processing_time_seconds.toFixed(1)}s
+              </span>
+            </div>
+          </div>
+
+          {/* 1. Extracted Diagram Information */}
+          <section className="workspace-card" id="extracted-info">
+            <div className="section-head">
+              <h2>Extracted Diagram Information</h2>
+              <span className="section-hint">
+                {result.findings.length} item
+                {result.findings.length === 1 ? "" : "s"} read off the drawing
+              </span>
+            </div>
+
+            <div className="result-stats">
+              <div className="result-stat">
+                <span className="num">{result.stats.filled_from_drawing}</span>
+                <span className="lbl">Filled From Drawing</span>
+              </div>
+              <div className="result-stat">
+                <span className="num">{result.stats.conflicts}</span>
+                <span className="lbl">Conflicts</span>
+              </div>
+              <div className="result-stat">
+                <span className="num">{result.stats.not_detected}</span>
+                <span className="lbl">Not Detected</span>
+              </div>
+            </div>
+
+            {categories.length > 0 && (
+              <div className="filter-chips">
+                <button
+                  className={`chip-filter ${
+                    categoryFilter === "all" ? "active" : ""
+                  }`}
+                  onClick={() => setCategoryFilter("all")}
+                >
+                  All
+                </button>
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    className={`chip-filter ${
+                      categoryFilter === c ? "active" : ""
+                    }`}
+                    onClick={() => setCategoryFilter(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="table-scroll findings-scroll">
+              <table className="data-table findings-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 52 }}>Page</th>
+                    <th style={{ width: 120 }}>Category</th>
+                    <th style={{ width: 130 }}>Part No</th>
+                    <th style={{ width: 220 }}>Value</th>
+                    <th>Detail</th>
+                    <th style={{ width: 70 }}>Conf.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFindings.map((f, i) => (
+                    <tr key={`${f.page_number}-${f.category}-${i}`}>
+                      <td className="mono">{f.page_number}</td>
+                      <td>
+                        <span className="tag">{f.category}</span>
+                      </td>
+                      <td>{f.part_no || "—"}</td>
+                      <td className="mono">{f.value}</td>
+                      <td className="detail-cell">{f.detail || "—"}</td>
+                      <td>{Math.round(f.confidence * 100)}%</td>
+                    </tr>
+                  ))}
+                  {filteredFindings.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="no-data">
+                        No extracted information in this category.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* 2. Final Report */}
+          <section className="workspace-card" id="final-report">
+            <div className="section-head">
+              <h2>Final Report</h2>
+              <span className="section-hint">
+                Exactly the columns written to the Excel file
+              </span>
+            </div>
+
+            <div className="table-scroll">
+              <table className="data-table report-table">
+                <thead>
+                  <tr>
+                    {result.table.columns.map((col) => (
+                      <th key={col}>{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.table.rows.map((row) => (
+                    <tr key={row.part_no}>
+                      {row.values.map((val, idx) => {
+                        const col = result.table.columns[idx];
+                        const cell = row.cells[col];
+                        return (
+                          <td
+                            key={col}
+                            className={cell ? cellClass(cell.status) : ""}
+                          >
+                            {val}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  {result.table.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={result.table.columns.length} className="no-data">
+                        No parts were detected on the drawing.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="legend">
+              <span>
+                <i className="swatch swatch-user" /> As entered by you
+              </span>
+              <span>
+                <i className="swatch swatch-filled" /> Filled in from the drawing
+              </span>
+              <span>
+                <i className="swatch swatch-conflict" /> Differs from the drawing
+                (your value kept)
+              </span>
+              <span>
+                <i className="swatch swatch-missing" /> Not detected
+              </span>
+            </div>
+          </section>
+
+          {/* 3. Download */}
+          <section className="workspace-card" id="download">
+            <div className="section-head">
+              <h2>Download</h2>
+            </div>
+            <div className="download-actions no-margin">
+              <a
+                href={getPartExcelUrl(jobId)}
+                download
+                className="btn btn-primary btn-lg"
+              >
+                <Download size={16} /> Download Analysis (Excel)
+              </a>
+              <span className="action-hint">
+                Four sheets: Report, Traceability, Drawing Information and
+                Analysis Log.
+              </span>
+            </div>
+          </section>
+        </>
       )}
     </div>
   );
