@@ -133,8 +133,8 @@ class ReportResolver:
                 pages = ", ".join(str(p) for p in cell.page_references) or "?"
                 row.warnings.append(
                     f"{column}: you entered '{cell.user_value}' but the drawing "
-                    f"shows '{cell.drawing_value}' (page {pages}, confidence "
-                    f"{cell.confidence:.0%}). Your value was kept."
+                    f"shows '{cell.drawing_value}' (page {pages}). "
+                    f"Your value was kept."
                 )
             elif cell.status == ValueStatus.MISSING:
                 row.warnings.append(
@@ -236,9 +236,9 @@ class ReportResolver:
                 drawing_value=drawing_value,
                 note=(
                     f"A possible value '{drawing_value}' was seen on page "
-                    f"{best.page_number} but confidence was only "
-                    f"{best.confidence:.0%} (threshold "
-                    f"{self.confidence_threshold:.0%}). Not used."
+                    f"{best.page_number} but could not be read clearly enough "
+                    f"to use (below the {self.confidence_threshold:.0%} "
+                    f"acceptance cut-off). Not used."
                 ),
             )
 

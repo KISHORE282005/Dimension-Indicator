@@ -314,7 +314,6 @@ export default function UploadPage() {
                     <th style={{ width: 130 }}>Part No</th>
                     <th style={{ width: 220 }}>Value</th>
                     <th>Detail</th>
-                    <th style={{ width: 70 }}>Conf.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -327,12 +326,11 @@ export default function UploadPage() {
                       <td>{f.part_no || "—"}</td>
                       <td className="mono">{f.value}</td>
                       <td className="detail-cell">{f.detail || "—"}</td>
-                      <td>{Math.round(f.confidence * 100)}%</td>
                     </tr>
                   ))}
                   {filteredFindings.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="no-data">
+                      <td colSpan={5} className="no-data">
                         No extracted information in this category.
                       </td>
                     </tr>

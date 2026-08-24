@@ -219,7 +219,7 @@ class ExcelReportWriter:
             "green: filled in from the drawing  |  "
             "amber: your entry differs from the drawing (your value kept)  |  "
             "red: not supplied and not detected.  "
-            "Hover any shaded cell for the page reference and confidence."
+            "Hover any shaded cell for the page reference."
         )
         legend.font = Font(size=8, italic=True, color=MUTED, name="Calibri")
         legend.alignment = LEFT
@@ -322,8 +322,6 @@ class ExcelReportWriter:
             lines.append(
                 "Page(s): " + ", ".join(str(p) for p in report_cell.page_references)
             )
-        if report_cell.confidence:
-            lines.append(f"Confidence: {report_cell.confidence:.0%}")
         if report_cell.note:
             lines.append("")
             lines.append(report_cell.note)
@@ -354,7 +352,6 @@ class ExcelReportWriter:
                         "User Entered": cell.user_value or "",
                         "Drawing Shows": cell.drawing_value or "",
                         "Page(s)": ", ".join(str(p) for p in cell.page_references),
-                        "Confidence": round(cell.confidence, 3),
                         "Note": cell.note or "",
                     }
                 )
@@ -363,14 +360,13 @@ class ExcelReportWriter:
             records,
             columns=[
                 "Part No", "Column", "Reported Value", "Source", "Status",
-                "User Entered", "Drawing Shows", "Page(s)", "Confidence", "Note",
+                "User Entered", "Drawing Shows", "Page(s)", "Note",
             ],
         )
         df.to_excel(writer, sheet_name="Traceability", index=False)
         self._format_simple_sheet(
             writer.book["Traceability"],
-            widths=[14, 16, 22, 12, 16, 16, 18, 10, 11, 55],
-            percent_columns={9},
+            widths=[14, 16, 22, 12, 16, 16, 18, 10, 55],
         )
 
     # ------------------------------------------------------------------
@@ -389,13 +385,12 @@ class ExcelReportWriter:
 
         df = pd.DataFrame(
             records,
-            columns=["Page", "Part No", "Category", "Value", "Detail", "Confidence", "Source"],
+            columns=["Page", "Part No", "Category", "Value", "Detail", "Source"],
         )
         df.to_excel(writer, sheet_name="Drawing Information", index=False)
         self._format_simple_sheet(
             writer.book["Drawing Information"],
-            widths=[7, 18, 16, 40, 50, 11, 10],
-            percent_columns={5},
+            widths=[7, 18, 16, 40, 50, 10],
         )
 
     @staticmethod
@@ -406,7 +401,6 @@ class ExcelReportWriter:
             "Category": finding.category.replace("_", " ").title(),
             "Value": finding.value,
             "Detail": finding.detail or "",
-            "Confidence": round(finding.confidence, 3),
             "Source": finding.source,
         }
 
