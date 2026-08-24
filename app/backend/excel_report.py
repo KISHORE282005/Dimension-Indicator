@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -123,7 +122,7 @@ class ExcelReportWriter:
 
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             # startrow leaves space for the title block written afterwards.
-            df.to_excel(writer, sheet_name="Report", index=False, startrow=3)
+            df.to_excel(writer, sheet_name="Report", index=False, startrow=1)
             self._write_traceability(writer, result)
             self._write_findings(writer, result)
             self._write_log(writer, result)
@@ -144,7 +143,7 @@ class ExcelReportWriter:
     ) -> None:
         n_cols = len(REPORT_COLUMNS)
         last_col = get_column_letter(n_cols)
-        header_row = 4
+        header_row = 2
         first_data_row = header_row + 1
         last_data_row = header_row + row_count
 
@@ -156,25 +155,6 @@ class ExcelReportWriter:
         title.fill = PatternFill("solid", start_color=TITLE_BG, end_color=TITLE_BG)
         title.alignment = CENTER
         ws.row_dimensions[1].height = 30
-
-        ws.merge_cells(f"A2:{last_col}2")
-        subtitle = ws["A2"]
-        subtitle.value = (
-            f"{settings.REPORT_COMPANY_NAME}    |    "
-            f"Source: {result.filename or 'n/a'}    |    "
-            f"Pages analysed: {result.pages_analyzed}/{result.total_pages}    |    "
-            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        )
-        subtitle.font = Font(size=9, color=MUTED, italic=True, name="Calibri")
-        subtitle.alignment = CENTER
-        ws.row_dimensions[2].height = 16
-
-        ws.merge_cells(f"A3:{last_col}3")
-        status = ws["A3"]
-        status.value = self._status_line(result)
-        status.font = Font(size=9, color=MUTED, name="Calibri")
-        status.alignment = CENTER
-        ws.row_dimensions[3].height = 16
 
         # --- Header row -----------------------------------------------
         header_fill = PatternFill("solid", start_color=HEADER_BG, end_color=HEADER_BG)
@@ -352,17 +332,6 @@ class ExcelReportWriter:
         comment.width = 320
         comment.height = 160
         return comment
-
-    @staticmethod
-    def _status_line(result: PartReportResult) -> str:
-        bits = [
-            f"OCR: {result.ocr_engine}",
-            f"Vision model: {result.vlm_model}",
-            f"Conflicts: {result.conflict_count()}",
-            f"Filled from drawing: {result.filled_count()}",
-            f"Not detected: {result.missing_count()}",
-        ]
-        return "    |    ".join(bits)
 
     # ------------------------------------------------------------------
     # Sheet 2: Traceability

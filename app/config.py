@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
 
+    #: Auto-reload on Python code changes. Off by default: the watcher treats
+    #: uploads/, output/ and .git/ activity as changes and restarts (or kills)
+    #: the server mid-analysis. Set RELOAD=true in .env only while editing
+    #: backend code.
+    RELOAD: bool = False
+
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     OUTPUT_DIR: Path = BASE_DIR / "output"

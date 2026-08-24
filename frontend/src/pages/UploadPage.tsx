@@ -33,6 +33,11 @@ function cellClass(status: CellStatus): string {
   }
 }
 
+const DROPZONE_ACCEPT = {
+  "application/pdf": [".pdf"],
+  "image/*": [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"],
+};
+
 export default function UploadPage() {
   const {
     phase,
@@ -70,13 +75,23 @@ export default function UploadPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      "application/pdf": [".pdf"],
-      "image/*": [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"],
-    },
+    accept: DROPZONE_ACCEPT,
     maxFiles: 1,
     multiple: false,
     disabled: phase === "uploading" || phase === "analyzing",
+  });
+
+  // A second, always-enabled dropzone shown on the results screen so a new
+  // drawing can be uploaded the moment one analysis finishes.
+  const {
+    getRootProps: getNextRootProps,
+    getInputProps: getNextInputProps,
+    isDragActive: isNextDragActive,
+  } = useDropzone({
+    onDrop,
+    accept: DROPZONE_ACCEPT,
+    maxFiles: 1,
+    multiple: false,
   });
 
   const categories = useMemo(() => {
@@ -94,12 +109,6 @@ export default function UploadPage() {
     <div className="page upload-page">
       <header className="page-header">
         <h1>Engineering Drawing Analysis</h1>
-        <p>
-          Upload an engineering diagram to automatically extract dimensions,
-          tolerances, GD&amp;T callouts and part data — then generate your
-          report in the fixed Excel format: S No, PART NO, DESCRIPTION, DWG NO,
-          WEIGHT (IN KG), THICKNESS, PROCESS, LENGTH, WIDTH and HEIGHT.
-        </p>
       </header>
 
       {(phase === "idle" || phase === "uploading") && (
@@ -228,6 +237,22 @@ export default function UploadPage() {
                 {result.total_pages === 1 ? "" : "s"} in{" "}
                 {result.processing_time_seconds.toFixed(1)}s
               </span>
+            </div>
+          </div>
+
+          {/* Analyze another drawing without leaving this page */}
+          <div
+            {...getNextRootProps()}
+            className={`dropzone-main compact ${
+              isNextDragActive ? "active" : ""
+            }`}
+          >
+            <input {...getNextInputProps()} />
+            <UploadCloud size={22} strokeWidth={1.5} />
+            <div className="dz-primary">
+              {isNextDragActive
+                ? "Drop the new drawing here..."
+                : "Analyse another drawing — drag & drop it here, or click to browse"}
             </div>
           </div>
 
@@ -393,6 +418,12 @@ export default function UploadPage() {
               >
                 <Download size={16} /> Download Analysis (Excel)
               </a>
+              <button
+                className="btn btn-secondary btn-lg"
+                onClick={reset}
+              >
+                <UploadCloud size={16} /> Upload Another Drawing
+              </button>
               <span className="action-hint">
                 Four sheets: Report, Traceability, Drawing Information and
                 Analysis Log.

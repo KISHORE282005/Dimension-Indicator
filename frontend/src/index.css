@@ -283,6 +283,15 @@ body {
   cursor: not-allowed;
 }
 
+.dropzone-main.compact {
+  padding: 26px 24px;
+}
+
+.dropzone-main.compact .dz-primary {
+  font-size: 14px;
+  margin-top: 6px;
+}
+
 .dz-primary {
   font-size: 16px;
   font-weight: 600;

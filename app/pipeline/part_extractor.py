@@ -39,6 +39,22 @@ from app.pipeline.gemini_client import GeminiClient, GeminiUnavailable
 
 logger = logging.getLogger(__name__)
 
+#: Readings that come from a sheet-metal DEVELOPMENT view (flat pattern /
+#: unfolded blank) describe the blank before bending, never the finished part,
+#: so they must not fill the LENGTH / WIDTH / HEIGHT columns.
+_DEVELOPMENT_VIEW_RE = re.compile(
+    r"\b(?:"
+    r"develop(?:ed|ment|ments)?|dev\.?|"
+    r"flat[\s-]*pattern(?:[\s-]*view)?|"
+    r"unfold(?:ed|ing)?|"
+    r"blank[\s-]*(?:size|length|dimension)|"
+    r"stretch[\s-]*out"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_LENGTH_FIELDS = frozenset({"length", "width", "height"})
+
 
 FIELD_GUIDANCE = """\
 Report the drawing's own wording and units. The examples below show the SHAPE of
@@ -69,15 +85,28 @@ examples do not mention, report what the drawing says.
   "bought out" / "purchased" / "standard part" for an item that is not made in
   house. Report whatever the drawing actually says, in its own words. Do NOT
   infer a process from the shape of the part.
-- length / width / height: the overall bounding size of the part, reported in
-  MILLIMETRES. Convert only when the source unit is explicitly printed or
-  stated by a units note (in/", ft, cm, m); put the converted number in `value`,
-  "mm" in `unit`, and the original text in `source_text`. If the drawing states
-  no unit anywhere, report the number as printed and leave `unit` null rather
-  than assuming. Prefer an explicit overall/OA/envelope dimension or a stock
-  size callout such as 200 x 100 x 6. Where the drawing gives no orientation,
-  order them largest to smallest. Do NOT report a feature dimension (hole
-  spacing, fillet, chamfer, bolt circle, thread size) as an overall dimension.
+- length / width / height: the overall bounding size of the FINISHED part,
+  reported in MILLIMETRES. Convert only when the source unit is explicitly
+  printed or stated by a units note (in/", ft, cm, m); put the converted number
+  in `value`, "mm" in `unit`, and the original text in `source_text`. If the
+  drawing states no unit anywhere, report the number as printed and leave
+  `unit` null rather than assuming. Prefer an explicit overall/OA/envelope
+  dimension or a stock size callout such as 200 x 100 x 6. Do NOT report a
+  feature dimension (hole spacing, fillet, chamfer, bolt circle, thread size)
+  as an overall dimension. Three hard orientation rules:
+  * NEVER take a dimension from a DEVELOPMENT VIEW, FLAT PATTERN or UNFOLDED
+    BLANK view. A development shows the stretched-out blank before bending -
+    its length is longer than the finished part and must never be reported as
+    length, width or height. Skip that view completely and read the finished
+    part's orthographic views instead.
+  * WIDTH IS OPPOSITE THE LENGTH: read LENGTH and WIDTH as a pair from ONE
+    view. WIDTH is the measurement perpendicular to (across, not along) the
+    LENGTH in that same view. Never take WIDTH from a different view or a
+    different direction than LENGTH, and never use the plate thickness as
+    WIDTH.
+  * HEIGHT comes only from a 3D MODEL view (isometric / pictorial): HEIGHT is
+    that model's Z axis - its vertical extent. If the page shows no 3D model
+    view, omit height entirely; do NOT guess it from a plan or front view.
 - thickness follows the same unit rule: convert to millimetres when the source
   unit is printed, and keep the original text in `source_text`.
 """
@@ -357,8 +386,27 @@ class PartExtractor:
 
             for field, payload in self._as_dict(entry.get("fields")).items():
                 ev = self._build_evidence(field, payload, page_number)
-                if ev is not None:
-                    evidence.append((resolved, ev))
+                if ev is None:
+                    continue
+                if self._is_development_view_reading(ev):
+                    # The reading stays visible as a finding so nothing is
+                    # silently lost, but it can never fill an L/W/H cell.
+                    findings.append(
+                        DrawingFinding(
+                            category="dimension",
+                            value=ev.value,
+                            detail=(
+                                f"Development/flat-pattern view reading "
+                                f"excluded from {ev.field}"
+                            ),
+                            page_number=page_number,
+                            part_no=resolved,
+                            confidence=ev.confidence,
+                            source="vlm",
+                        )
+                    )
+                    continue
+                evidence.append((resolved, ev))
 
         # A BOM row is itself evidence for that part's description and dwg no.
         for part in bom_parts:
@@ -491,6 +539,16 @@ class PartExtractor:
             source_text=source_text or None,
             reasoning=self._clean_str(data.get("reasoning")) or None,
         )
+
+    @staticmethod
+    def _is_development_view_reading(ev: FieldEvidence) -> bool:
+        """True when an L/W/H reading comes from a development/flat-pattern view."""
+        if ev.field not in _LENGTH_FIELDS:
+            return False
+        haystack = " ".join(
+            part for part in (ev.source_text or "", ev.reasoning or "") if part
+        )
+        return bool(_DEVELOPMENT_VIEW_RE.search(haystack))
 
     def _build_finding(self, raw: Any, page_number: int) -> Optional[DrawingFinding]:
         data = self._as_dict(raw)

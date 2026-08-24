@@ -40,7 +40,25 @@ def main() -> None:
         "app.backend.api:app",
         host=settings.API_HOST,
         port=settings.API_PORT,
-        reload=settings.DEBUG,
+        reload=settings.RELOAD,
+        reload_excludes=(
+            [
+                "uploads",
+                "uploads/*",
+                "output",
+                "output/*",
+                "database",
+                "database/*",
+                ".git",
+                ".git/*",
+                "frontend/node_modules",
+                "frontend/node_modules/*",
+                "frontend/dist",
+                "frontend/dist/*",
+            ]
+            if settings.RELOAD
+            else None
+        ),
         log_level="debug" if settings.DEBUG else "info",
     )
 

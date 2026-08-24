@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import type { MouseEvent } from "react";
 import {
   Download,
   FileSearch,
@@ -12,7 +13,7 @@ import { useWorkspace } from "../context/WorkspaceContext";
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { phase, fileName, progress } = useWorkspace();
+  const { phase, fileName, progress, reset } = useWorkspace();
 
   const busy = phase === "uploading" || phase === "analyzing";
   const done = phase === "done";
@@ -25,6 +26,21 @@ export default function Sidebar() {
         block: "start",
       });
     }, 80);
+  };
+
+  const startNewUpload = () => {
+    reset();
+    if (location.pathname !== "/") navigate("/");
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 80);
+  };
+
+  // Once a run has finished (or failed), "Upload" must always land on a clean
+  // upload screen - never on the stale results. Only an in-flight upload or a
+  // running analysis keeps the current session alive.
+  const handleNavUpload = (e: MouseEvent) => {
+    if (busy || phase === "idle") return;
+    e.preventDefault();
+    startNewUpload();
   };
 
   return (
@@ -40,7 +56,11 @@ export default function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
-        <Link to="/" className={location.pathname === "/" ? "active" : ""}>
+        <Link
+          to="/"
+          className={location.pathname === "/" ? "active" : ""}
+          onClick={handleNavUpload}
+        >
           <UploadCloud size={16} /> Upload
         </Link>
         <Link
@@ -54,7 +74,7 @@ export default function Sidebar() {
       <div className="sidebar-upload">
         <button
           className="sidebar-upload-btn"
-          onClick={() => navigate("/")}
+          onClick={startNewUpload}
           disabled={busy}
         >
           <UploadCloud size={18} />

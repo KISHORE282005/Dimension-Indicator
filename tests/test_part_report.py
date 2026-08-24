@@ -463,6 +463,54 @@ def test_process_vocabulary_is_not_restricted():
     assert "in its own words" in pe.FIELD_GUIDANCE
 
 
+def test_orientation_rules_are_in_the_prompt():
+    """Development-view ban, width-opposite-length, height-from-Z-axis."""
+    from app.pipeline import part_extractor as pe
+
+    flat = " ".join(pe.FIELD_GUIDANCE.split()).upper()
+    assert "DEVELOPMENT" in flat and "FLAT PATTERN" in flat, (
+        "the prompt must forbid development/flat-pattern dimensions"
+    )
+    assert "WIDTH IS OPPOSITE THE LENGTH" in flat
+    assert "Z AXIS" in flat, "height must be tied to the 3D model's Z axis"
+
+
+def test_development_view_dimensions_never_fill_lwh():
+    """A development/flat-pattern reading is excluded from LENGTH/WIDTH/HEIGHT."""
+    from app.pipeline import part_extractor as pe
+
+    extractor = pe.PartExtractor()
+    parsed = {
+        "bom_parts": [],
+        "title_block": None,
+        "parts_on_page": [
+            {
+                "part_no": "BR-1042",
+                "matched_user_part_no": "BR-1042",
+                "fields": {
+                    "length": {"value": "1240", "unit": "mm", "confidence": 0.9,
+                               "source_text": "DEVELOPMENT LENGTH 1240"},
+                    "width": {"value": "200", "unit": "mm", "confidence": 0.85,
+                              "source_text": "OVERALL 200"},
+                    "height": {"value": "45", "unit": "mm", "confidence": 0.9,
+                               "source_text": "ISOMETRIC VIEW Z 45"},
+                },
+            }
+        ],
+        "findings": [],
+        "part_numbers": [],
+    }
+    parts = [PartInput(s_no="1", part_no="BR-1042")]
+    out = extractor._parse_page_response(parsed, 1, parts)
+
+    fields = {f.field for _, f in out["evidence"]}
+    assert "length" not in fields, "development-view length must not reach the report"
+    assert fields == {"width", "height"}
+    assert any("Development" in (f.detail or "") for f in out["findings"]), (
+        "the excluded reading must stay visible as a finding"
+    )
+
+
 def test_bom_headings_are_matched_on_meaning_not_exact_text():
     import re
 
@@ -490,37 +538,37 @@ def workbook():
 
 def test_headers_are_fixed_and_ordered():
     ws = workbook()["Report"]
-    headers = [ws.cell(row=4, column=i + 1).value for i in range(len(REPORT_COLUMNS))]
+    headers = [ws.cell(row=2, column=i + 1).value for i in range(len(REPORT_COLUMNS))]
     assert headers == list(REPORT_COLUMNS)
 
 
 def test_report_sheet_is_formatted():
     ws = workbook()["Report"]
-    assert ws.freeze_panes == "A5", "the header row must stay visible while scrolling"
+    assert ws.freeze_panes == "A3", "the header row must stay visible while scrolling"
     assert ws.auto_filter.ref is not None
     assert "ENGINEERING DRAWING ANALYSIS REPORT" in str(ws["A1"].value)
     assert ws.column_dimensions["C"].width == 40
-    assert ws.cell(row=5, column=1).border.left.style == "thin"
+    assert ws.cell(row=3, column=1).border.left.style == "thin"
     assert ws.page_setup.orientation == "landscape"
 
 
 def test_numeric_columns_hold_real_numbers():
     ws = workbook()["Report"]
-    assert ws.cell(row=5, column=6).value == 6, "thickness must be a number, not text"
-    assert ws.cell(row=5, column=5).value == 2.4
-    assert ws.cell(row=5, column=5).number_format == "0.00"
-    length = ws.cell(row=5, column=8)
+    assert ws.cell(row=3, column=6).value == 6, "thickness must be a number, not text"
+    assert ws.cell(row=3, column=5).value == 2.4
+    assert ws.cell(row=3, column=5).number_format == "0.00"
+    length = ws.cell(row=3, column=8)
     assert length.value == 200, "LENGTH (mm) must be a number, not text"
 
 
 def test_unresolved_values_read_not_detected():
     ws = workbook()["Report"]
-    assert ws.cell(row=5, column=10).value == "Not Detected"
+    assert ws.cell(row=3, column=10).value == "Not Detected"
 
 
 def test_conflicts_are_visible_in_the_workbook():
     ws = workbook()["Report"]
-    cell = ws.cell(row=5, column=6)
+    cell = ws.cell(row=3, column=6)
     assert cell.fill.start_color.rgb.endswith("FFF2CC"), "conflict cells are shaded amber"
     assert cell.comment is not None, "and carry the drawing value on hover"
 
@@ -598,7 +646,7 @@ def test_api_round_trip():
     assert excel.status_code == 200
     assert excel.content[:2] == b"PK", "must be a real xlsx archive"
     downloaded = openpyxl.load_workbook(io.BytesIO(excel.content))
-    assert [downloaded["Report"].cell(row=4, column=i + 1).value
+    assert [downloaded["Report"].cell(row=2, column=i + 1).value
             for i in range(len(REPORT_COLUMNS))] == list(REPORT_COLUMNS)
 
     image = client.get(f"/api/part-report/page-image/{document_id}/2")
