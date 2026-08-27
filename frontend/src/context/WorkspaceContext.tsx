@@ -29,6 +29,7 @@ interface WorkspaceState {
   fileName: string;
   fileSize: number;
   pageCount: number;
+  fileCount: number;
   documentId: string | null;
   jobId: string | null;
   progress: number;
@@ -48,6 +49,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState(0);
   const [pageCount, setPageCount] = useState(0);
+  const [fileCount, setFileCount] = useState(1);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -74,22 +76,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     async (files: File[]) => {
       if (!files.length) return;
       stopPolling();
-      const file = files[0];
       setPhase("uploading");
-      setStage("Uploading drawing...");
+      setStage("Uploading drawing(s)...");
       setError(null);
       setResult(null);
       try {
-        const res = await uploadPartReport(file);
+        const res = await uploadPartReport(files);
         setFileName(res.filename);
         setFileSize(res.size_bytes);
         setPageCount(res.page_count);
+        setFileCount(res.file_count || res.files?.length || 1);
         setDocumentId(res.document_id);
         setPhase("ready");
+        const count = res.file_count || res.files?.length || 1;
         toast.success(
-          `${res.filename} uploaded (${res.page_count} page${
-            res.page_count === 1 ? "" : "s"
-          })`
+          `${count} drawing${count === 1 ? "" : "s"} uploaded (${
+            res.page_count
+          } page${res.page_count === 1 ? "" : "s"})`
         );
       } catch (err: any) {
         setError(err.response?.data?.detail || "Upload failed. Please try again.");
@@ -149,6 +152,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setFileName("");
     setFileSize(0);
     setPageCount(0);
+    setFileCount(1);
     setDocumentId(null);
     setJobId(null);
     setProgress(0);
@@ -165,6 +169,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         fileName,
         fileSize,
         pageCount,
+        fileCount,
         documentId,
         jobId,
         progress,

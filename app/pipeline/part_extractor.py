@@ -73,18 +73,30 @@ examples do not mention, report what the drawing says.
   printed (g, kg, kgf, lb, oz, t). If a number is printed with no unit at all,
   report it as printed and do not assume a unit. On an assembly sheet the title
   block weight is the ASSEMBLY's weight - do not attribute it to a component.
-- thickness: material or plate thickness - "6 THK", "t=6", "THK 8", "6mm PLATE",
-  a gauge, or the stock size. When the drawing shows the part is purchased,
-  standard or otherwise has no plate thickness, report the value "NA". Do NOT
-  use an arbitrary small linear dimension as thickness.
-- process: how the part is made, as the drawing states it. It may appear in the
-  title block process/material field, a process or routing note, a BOM column,
-  or a stamp. Examples of the kind of value expected: laser cutting, bending,
-  machining, turning, milling, casting, forging, stamping, welding,
-  fabrication, sheet metal, plasma/flame cutting, extrusion, moulding, or
-  "bought out" / "purchased" / "standard part" for an item that is not made in
-  house. Report whatever the drawing actually says, in its own words. Do NOT
-  infer a process from the shape of the part.
+- thickness: the material or plate thickness. recognised by ANY of these label
+  patterns on the drawing: "THK", "thk", "Thk", "THICK", "thick", "t=",
+  "T=", "THICKNESS", "PLATE", "GAUGE", "gauge". The value next to one of
+  these labels IS the thickness - always report it here regardless of which
+  view it appears on (development view, flat pattern, detail view, etc.).
+  Examples: "6 THK" → thickness=6, "t=3" → thickness=3, "THK 10" →
+  thickness=10, "8mm PLATE" → thickness=8. When the drawing shows the part
+  is purchased, standard or otherwise has no plate thickness, report "NA".
+  Do NOT use an arbitrary small linear dimension as thickness.
+- process: the manufacturing process or processes applied to the part. Report
+  from these known processes when the drawing shows them: laser cutting,
+  bending, drilling, tapping, welding. If the drawing mentions multiple
+  processes, list them separated by commas (e.g. "laser cutting, bending,
+  drilling"). If the drawing does not state a process, leave this field blank.
+  Do NOT infer a process from the shape of the part. Recognise bending and
+  welding from their tell-tale drawing markers as well as the explicit word:
+  * BENDING: report "bending" when the drawing prints a bending radius (e.g.
+    "R=5", "bend radius", "BR 5") or a bend angle (e.g. "90°", "BEND 90"),
+    or labels a bend line / bend allowance / bend direction on a bent part.
+    A draw-formed part showing a bend radius and bend angle is being bent.
+  * WELDING: report "welding" when the drawing shows welding / fillet weld
+    symbols (e.g. a fillet size callout such as "z1", "z2", "a5", "Z 6",
+    "FIL", "WELD"), the word "welding"/"weld" in a note, or a weld symbol on
+    the drawing. A part with fillet weld symbols is being welded.
 - length / width / height: the overall bounding size of the FINISHED part,
   reported in MILLIMETRES. Convert only when the source unit is explicitly
   printed or stated by a units note (in/", ft, cm, m); put the converted number
@@ -93,22 +105,51 @@ examples do not mention, report what the drawing says.
   `unit` null rather than assuming. Prefer an explicit overall/OA/envelope
   dimension or a stock size callout such as 200 x 100 x 6. Do NOT report a
   feature dimension (hole spacing, fillet, chamfer, bolt circle, thread size)
-  as an overall dimension. Three hard orientation rules:
-  * NEVER take a dimension from a DEVELOPMENT VIEW, FLAT PATTERN or UNFOLDED
-    BLANK view. A development shows the stretched-out blank before bending -
-    its length is longer than the finished part and must never be reported as
-    length, width or height. Skip that view completely and read the finished
-    part's orthographic views instead.
-  * WIDTH IS OPPOSITE THE LENGTH: read LENGTH and WIDTH as a pair from ONE
-    view. WIDTH is the measurement perpendicular to (across, not along) the
-    LENGTH in that same view. Never take WIDTH from a different view or a
-    different direction than LENGTH, and never use the plate thickness as
-    WIDTH.
-  * HEIGHT comes only from a 3D MODEL view (isometric / pictorial): HEIGHT is
-    that model's Z axis - its vertical extent. If the page shows no 3D model
-    view, omit height entirely; do NOT guess it from a plan or front view.
-- thickness follows the same unit rule: convert to millimetres when the source
-  unit is printed, and keep the original text in `source_text`.
+  as an overall dimension. Orientation rules:
+
+  STEP 1 — Identify the view type:
+    DEVELOPMENT VIEW / FLAT PATTERN / UNFOLDED BLANK: the sheet is labelled
+    "development", "flat pattern", "unfolded", "blank size", "stretch-out",
+    or similar. A development shows the stretched-out blank BEFORE bending.
+    FINISHED PART VIEW: orthographic views (front, top, side) or a 3D model
+    (isometric / pictorial) showing the part AFTER all forming operations.
+
+  STEP 2 — Read LENGTH and WIDTH from the FINISHED PART view only:
+    * NEVER read LENGTH or WIDTH from a DEVELOPMENT VIEW. That view shows the
+      blank before bending - its dimensions are larger than the finished part.
+      Skip that view completely for L/W.
+    * LENGTH = X axis = the LONGEST overall dimension of the finished part.
+    * WIDTH = Y axis = the dimension OPPOSITE and PERPENDICULAR to LENGTH,
+      read from the SAME view as LENGTH. Never take WIDTH from a different
+      view or direction. Never use plate thickness as WIDTH.
+
+  STEP 3 — Determine HEIGHT using the flat-vs-3D decision tree:
+    * IF the part is shown in a FLAT manner (the drawing shows the part
+      lying flat, flat orientation, the sheet has a flat-pattern view label,
+      or the geometry is clearly a flat plate/bracket before bending):
+      → HEIGHT = the material THICKNESS value. Use the thickness value you
+        already extracted (from the THK/t=/PLATE callout). This is the
+        physical vertical extent of a flat part sitting on its face.
+    * IF the part is shown in a 3D / formed / assembled orientation (isometric
+      view, pictorial, or assembled context):
+      → Classify the dimension as HEIGHT ONLY when it represents the overall
+        vertical extent of the physical component. Accept as HEIGHT only when
+        the drawing confirms ONE of these:
+          (a) an overall vertical dimension spanning base to top of the
+              formed part, OR
+          (b) a dimension explicitly labelled "HEIGHT", "H", "HT", or
+              "overall height", OR
+          (c) a dimension on an isometric / 3D view that clearly spans the
+              full vertical extent from the lowest to highest point of the
+              formed component.
+      → Do NOT assume that every vertical dimension on the drawing is Height.
+        The physical meaning must be established from the view and geometry.
+        A vertical dimension on a 2D orthographic view may be a feature
+        dimension (hole position, slot depth, rib height), NOT the overall
+        component height. Omit height if no overall vertical extent can be
+        confirmed.
+    * IF no 3D view exists and the part is NOT flat → omit height entirely.
+      Do NOT guess height from a plan or front view alone.
 """
 
 PAGE_PROMPT = """\
@@ -127,6 +168,33 @@ drawing. Extract only what is genuinely visible on this page.
 5. `confidence` must reflect how certain you are that you read this correctly
    AND that it belongs to this part. Use below 0.5 when unsure.
 6. Report numbers without unit suffixes in `value`; put the unit in `unit`.
+7. PROCESS field: report these processes when the drawing shows them: laser
+   cutting, bending, drilling, tapping, welding. Multiple processes are
+   comma-separated. Do NOT infer process from part shape alone, BUT do treat
+   these drawing markers as evidence of a process:
+   * BENDING: a bending radius (e.g. "R=5", "bend radius", "BR 5") or a bend
+     angle (e.g. "90°", "BEND 90"), or a labelled bend line / bend allowance
+     on a bent part → report "bending".
+   * WELDING: a welding / fillet weld symbol or fillet size callout (e.g.
+     "z1", "z2", "a5", "Z 6", "FIL", "WELD"), or the word "welding"/"weld" in
+     a note → report "welding".
+8. THICKNESS: any label matching "THK", "thk", "Thk", "THICK", "thick",
+   "t=", "T=", "THICKNESS", "PLATE", "GAUGE" identifies the thickness
+   value. Always extract it regardless of which view it appears on.
+9. DIMENSION orientation: X axis = LENGTH (longest overall dimension),
+   Y axis = WIDTH (opposite/perpendicular to LENGTH), Z axis = HEIGHT.
+10. HEIGHT classification — use the flat-vs-3D decision tree:
+    (a) FLAT part (lying flat, flat orientation, flat-pattern view label,
+        or clearly a flat plate/bracket before bending):
+        → HEIGHT = material THICKNESS value.
+    (b) 3D / formed / assembled part (isometric view, pictorial):
+        → HEIGHT = overall vertical extent ONLY when the drawing confirms:
+           - an overall vertical dimension spanning base to top, OR
+           - a dimension labelled "HEIGHT", "H", "HT", "overall height", OR
+           - a 3D-view dimension clearly spanning the full vertical extent.
+        → Do NOT assume every vertical dimension is Height. The physical
+          meaning must be established from the view and geometry.
+    (c) No 3D view and part is not flat → omit height entirely.
 
 ## The parts list, if this page has one
 

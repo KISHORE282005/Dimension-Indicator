@@ -29,6 +29,7 @@ from app.models.part_schemas import (
 from app.pipeline.document_processor import DocumentProcessor
 from app.pipeline.ocr_engine import OCREngine
 from app.pipeline.part_extractor import PartExtractor
+from app.pipeline.process_detector import process_evidence_for_parts
 from app.pipeline.symbol_detector import SymbolDetector
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ class PartReportPipeline:
             )
 
             analysis = PageAnalysis(page_number=page.page_number)
+            page_data: Optional[dict] = None
 
             ocr_results = []
             if use_ocr:
@@ -216,6 +218,16 @@ class PartReportPipeline:
                 analysis.part_numbers_seen = page_data.get("part_numbers", [])
             else:
                 analysis.findings_count = len(symbol_findings)
+
+            # Auto-generate the manufacturing process from the drawing text so
+            # the PROCESS column is filled even when the vision model does not
+            # name it. Bending (bend radius/angle) and welding (fillet/weld
+            # symbols such as z1, z2) are recognised from their drawing markers.
+            page_part_numbers = self._page_part_numbers(page_data, supplied)
+            for parti_no, ev in process_evidence_for_parts(
+                ocr_text, page.page_number, page_part_numbers
+            ):
+                evidence_by_part.setdefault(parti_no, []).append(ev)
 
             analysis.processing_time_seconds = time.time() - page_started
             result.page_analyses.append(analysis)
@@ -282,6 +294,39 @@ class PartReportPipeline:
     # ------------------------------------------------------------------
     # Row selection
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _page_part_numbers(page_data: dict, supplied: Sequence[PartInput]) -> list[str]:
+        """The part numbers this page belongs to, used to attribute the
+        auto-detected process. Prefers the numbers the page itself references;
+        in supplied mode a lone supplied part is always a safe target because a
+        single-part sheet names that part by definition."""
+        keys: list[str] = []
+        seen: set[str] = set()
+
+        if page_data:
+            for raw in page_data.get("part_numbers", []):
+                n = str(raw or "").strip()
+                if n and n not in seen:
+                    seen.add(n)
+                    keys.append(n)
+            for part in page_data.get("bom_parts", []):
+                n = getattr(part, "part_no", "") or ""
+                n = str(n).strip()
+                if n and n not in seen:
+                    seen.add(n)
+                    keys.append(n)
+            title = page_data.get("title_block")
+            if title is not None:
+                n = str(getattr(title, "part_no", "") or "").strip()
+                if n and n not in seen:
+                    seen.add(n)
+                    keys.append(n)
+
+        if not keys and len(supplied) == 1 and supplied[0].part_no:
+            keys.append(supplied[0].part_no)
+
+        return keys
 
     @staticmethod
     def _select_rows(

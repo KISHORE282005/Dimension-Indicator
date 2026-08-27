@@ -247,11 +247,21 @@ export interface HistoryItem {
 // Part report workflow (fixed 10-column Excel format)
 // ---------------------------------------------------------------------------
 
+export interface PartUploadedFile {
+  filename: string;
+  size_bytes: number;
+  page_count: number;
+  stored_as: string;
+}
+
 export interface PartUploadResponse {
   document_id: string;
   filename: string;
   size_bytes: number;
   page_count: number;
+  file_count: number;
+  total_pages: number;
+  files: PartUploadedFile[];
   stored_as: string;
 }
 

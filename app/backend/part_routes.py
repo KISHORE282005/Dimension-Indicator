@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from typing import List
 
 from app.backend.excel_report import ExcelReportWriter
 from app.config import settings
@@ -34,6 +35,10 @@ router = APIRouter(prefix="/api/part-report", tags=["part-report"])
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+#: A single batch accepts up to this many drawings. A single drawing still
+#: works - one is always allowed - but batches of 2..MAX_FILES_PER_BATCH are
+#: combined into one report.
+MAX_FILES_PER_BATCH = 15
 
 _pipeline: Optional[PartReportPipeline] = None
 _pipeline_lock = threading.Lock()
@@ -121,51 +126,98 @@ async def capabilities() -> dict:
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)) -> dict:
-    """Accept a drawing and report how many pages it has."""
-    if not file.filename:
-        raise HTTPException(400, "No filename provided.")
+async def upload(files: List[UploadFile] = File(...)) -> dict:
+    """Accept one or more drawings and combine them into a single set.
 
-    ext = Path(file.filename).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    One drawing (a PDF or an image) is a normal single-part batch. Ten to
+    fifteen drawings uploaded together are combined into one multi-page
+    document and analysed as one unit - the report covers every drawing in a
+    single fixed-column table.
+    """
+    if not files:
+        raise HTTPException(400, "No files provided.")
+
+    if len(files) > MAX_FILES_PER_BATCH:
         raise HTTPException(
             400,
-            f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            f"Too many drawings. A batch accepts up to {MAX_FILES_PER_BATCH} "
+            f"drawings; you uploaded {len(files)}.",
         )
 
     document_id = str(uuid.uuid4())
-    destination = Path(settings.UPLOAD_DIR) / f"{document_id}{ext}"
+    folder = Path(settings.UPLOAD_DIR) / document_id
+    folder.mkdir(parents=True, exist_ok=True)
 
-    size = 0
-    try:
-        with open(destination, "wb") as out:
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        413,
-                        f"File exceeds the {MAX_UPLOAD_BYTES // (1024*1024)} MB limit.",
-                    )
-                out.write(chunk)
-    except HTTPException:
-        destination.unlink(missing_ok=True)
-        raise
-    except Exception as e:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(500, f"Could not save the upload: {e}")
+    infos: list[dict] = []
+    total_size = 0
 
-    if size == 0:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(400, "The uploaded file is empty.")
+    for index, file in enumerate(files, start=1):
+        if not file.filename:
+            raise HTTPException(400, f"No filename provided for file {index}.")
 
-    page_count = _count_pages(destination, ext)
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                400,
+                f"Unsupported file type '{ext}' in '{file.filename}'. Allowed: "
+                f"{', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            )
+
+        safe_name = "".join(ch for ch in Path(file.filename).stem
+                            if ch.isalnum() or ch in " _-") or "drawing"
+        destination = folder / f"{index:02d}_{safe_name}{ext}"
+
+        size = 0
+        try:
+            with open(destination, "wb") as out:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if total_size + size > MAX_UPLOAD_BYTES:
+                        raise HTTPException(
+                            413,
+                            f"Batch exceeds the "
+                            f"{MAX_UPLOAD_BYTES // (1024*1024)} MB limit.",
+                        )
+                    out.write(chunk)
+        except HTTPException:
+            destination.unlink(missing_ok=True)
+            raise
+        except Exception as e:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(500, f"Could not save the upload: {e}")
+
+        if size == 0:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(400, f"'{file.filename}' is empty.")
+
+        total_size += size
+        infos.append(
+            {
+                "filename": file.filename,
+                "size_bytes": size,
+                "page_count": _count_pages(destination, ext),
+                "stored_as": destination.name,
+            }
+        )
+
+    # Combine every drawing into a single multi-page PDF so the pipeline runs
+    # once and produces one report with sequential page numbers.
+    combined = _combine_uploads(folder, document_id)
+    combined_pages = _count_pages(combined, ".pdf")
 
     return {
         "document_id": document_id,
-        "filename": file.filename,
-        "size_bytes": size,
-        "page_count": page_count,
-        "stored_as": destination.name,
+        "filename": (
+            f"{infos[0]['filename']} +{len(infos) - 1} more"
+            if len(infos) > 1
+            else infos[0]["filename"]
+        ),
+        "size_bytes": total_size,
+        "page_count": combined_pages,
+        "file_count": len(infos),
+        "total_pages": combined_pages,
+        "files": infos,
+        "stored_as": combined.name,
     }
 
 
@@ -182,6 +234,61 @@ def _count_pages(path: Path, ext: str) -> int:
         return 0
 
 
+def _combine_uploads(folder: Path, document_id: str) -> Path:
+    """Concatenate a batch folder's drawings into one multi-page PDF.
+
+    PDFs are appended page for page; images are placed onto their own pages.
+    Returns the path of the combined document, named ``<id>.combined.pdf`` so
+    the existing ``<id>.*`` globs pick it up for analysis and preview.
+    """
+    import fitz
+
+    combined = Path(settings.UPLOAD_DIR) / f"{document_id}.combined.pdf"
+    files = sorted(
+        (f for f in folder.iterdir() if f.suffix.lower() in ALLOWED_EXTENSIONS),
+        key=lambda f: f.name,
+    )
+
+    out = fitz.open()
+    try:
+        for f in files:
+            if f.suffix.lower() == ".pdf":
+                src = fitz.open(str(f))
+                try:
+                    out.insert_pdf(src)
+                finally:
+                    src.close()
+            else:
+                page = out.new_page()
+                try:
+                    page.insert_image(page.rect, filename=str(f))
+                except Exception as e:
+                    logger.warning("Could not embed image %s: %s", f.name, e)
+                    continue
+        out.save(str(combined))
+    except Exception as e:
+        logger.error("Combining drawings into %s failed: %s", combined.name, e)
+        raise
+    finally:
+        out.close()
+    return combined
+
+
+def _batch_display_name(document_id: str) -> str:
+    """A human-friendly name for a batch, for report downloads."""
+    folder = Path(settings.UPLOAD_DIR) / document_id
+    if folder.is_dir():
+        files = sorted(
+            (f for f in folder.iterdir() if f.suffix.lower() in ALLOWED_EXTENSIONS),
+            key=lambda f: f.name,
+        )
+        if files:
+            stem = Path(files[0]).stem
+            extra = len(files) - 1
+            return f"{stem} +{extra} more" if extra else stem
+    return document_id
+
+
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
@@ -191,6 +298,7 @@ def _count_pages(path: Path, ext: str) -> int:
 async def analyze(request: AnalysisRequest) -> dict:
     """Start analysis. Returns a job_id to poll."""
     matches = list(Path(settings.UPLOAD_DIR).glob(f"{request.document_id}.*"))
+    matches = [m for m in matches if m.suffix.lower() in ALLOWED_EXTENSIONS]
     if not matches:
         raise HTTPException(404, f"Document not found: {request.document_id}")
 
@@ -399,7 +507,7 @@ async def excel(job_id: str) -> FileResponse:
         logger.exception("Excel generation failed for job %s", job_id)
         raise HTTPException(500, f"Excel generation failed: {e}")
 
-    stem = Path(report.filename).stem or "drawing"
+    stem = _batch_display_name(report.document_id)
     safe_stem = "".join(c for c in stem if c.isalnum() or c in "-_ ").strip() or "drawing"
     download_name = f"{safe_stem}_analysis_report.xlsx"
 
@@ -414,6 +522,7 @@ async def excel(job_id: str) -> FileResponse:
 async def page_image(document_id: str, page_number: int) -> FileResponse:
     """Render one page as a PNG for the UI preview."""
     matches = list(Path(settings.UPLOAD_DIR).glob(f"{document_id}.*"))
+    matches = [m for m in matches if m.suffix.lower() in ALLOWED_EXTENSIONS]
     if not matches:
         raise HTTPException(404, "Document not found.")
 

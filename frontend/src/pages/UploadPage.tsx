@@ -44,6 +44,7 @@ export default function UploadPage() {
     fileName,
     fileSize,
     pageCount,
+    fileCount,
     documentId,
     jobId,
     progress,
@@ -76,13 +77,12 @@ export default function UploadPage() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: DROPZONE_ACCEPT,
-    maxFiles: 1,
-    multiple: false,
+    multiple: true,
     disabled: phase === "uploading" || phase === "analyzing",
   });
 
   // A second, always-enabled dropzone shown on the results screen so a new
-  // drawing can be uploaded the moment one analysis finishes.
+  // set of drawings can be uploaded the moment one analysis finishes.
   const {
     getRootProps: getNextRootProps,
     getInputProps: getNextInputProps,
@@ -90,8 +90,7 @@ export default function UploadPage() {
   } = useDropzone({
     onDrop,
     accept: DROPZONE_ACCEPT,
-    maxFiles: 1,
-    multiple: false,
+    multiple: true,
   });
 
   const categories = useMemo(() => {
@@ -129,12 +128,13 @@ export default function UploadPage() {
               <UploadCloud size={34} strokeWidth={1.5} />
               <div className="dz-primary">
                 {isDragActive
-                  ? "Drop the file here..."
-                  : "Drag & drop your drawing here, or click to browse"}
+                  ? "Drop the drawings here..."
+                  : "Drag & drop your drawing(s) here, or click to browse"}
               </div>
               <div className="dz-secondary">
-                Supports PDF, JPG, PNG, TIFF, BMP, WebP — every page is
-                analysed
+                Upload one drawing, or up to 15 drawings together — they are
+                analysed and reported as one set. Supports PDF, JPG, PNG,
+                TIFF, BMP, WebP.
               </div>
             </>
           )}
@@ -148,7 +148,8 @@ export default function UploadPage() {
             <div className="file-info">
               <strong>{fileName}</strong>
               <span>
-                {formatSize(fileSize)} &middot; {pageCount} page
+                {formatSize(fileSize)} &middot; {fileCount} drawing
+                {fileCount === 1 ? "" : "s"} &middot; {pageCount} page
                 {pageCount === 1 ? "" : "s"} &middot; ready to analyze
               </span>
             </div>
@@ -232,7 +233,8 @@ export default function UploadPage() {
             <div className="status-banner success">
               <CheckCircle2 size={18} />
               <span>
-                Analysis complete for <strong>{result.filename}</strong> —{" "}
+                Analysis complete for <strong>{fileName}</strong> — {fileCount}{" "}
+                drawing{fileCount === 1 ? "" : "s"},{" "}
                 {result.pages_analyzed} of {result.total_pages} page
                 {result.total_pages === 1 ? "" : "s"} in{" "}
                 {result.processing_time_seconds.toFixed(1)}s
@@ -251,8 +253,8 @@ export default function UploadPage() {
             <UploadCloud size={22} strokeWidth={1.5} />
             <div className="dz-primary">
               {isNextDragActive
-                ? "Drop the new drawing here..."
-                : "Analyse another drawing — drag & drop it here, or click to browse"}
+                ? "Drop the new drawing(s) here..."
+                : "Analyse another drawing or set — drag & drop it here, or click to browse"}
             </div>
           </div>
 

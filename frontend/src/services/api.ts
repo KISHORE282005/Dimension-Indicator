@@ -20,10 +20,10 @@ const api = axios.create({ baseURL: "/api" });
 // ---------------------------------------------------------------------------
 
 export const uploadPartReport = async (
-  file: File
+  files: File[]
 ): Promise<PartUploadResponse> => {
   const formData = new FormData();
-  formData.append("file", file);
+  files.forEach((file) => formData.append("files", file));
   const { data } = await api.post<PartUploadResponse>(
     "/part-report/upload",
     formData

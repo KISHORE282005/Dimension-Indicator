@@ -460,7 +460,41 @@ def test_process_vocabulary_is_not_restricted():
     assert "not a list to choose from" in pe.FIELD_GUIDANCE, (
         "the prompt must not present its examples as a closed vocabulary"
     )
-    assert "in its own words" in pe.FIELD_GUIDANCE
+
+
+def test_process_markers_for_bending_and_welding():
+    """Bending is recognised from a bend radius/angle and welding from weld
+    symbols/fillet-size callouts, so the process gets captured."""
+    from app.pipeline import part_extractor as pe
+
+    guidance = " ".join(pe.FIELD_GUIDANCE.split()).upper()
+    page_prompt = " ".join(pe.PAGE_PROMPT.split()).upper()
+
+    assert "BEND RADIUS" in guidance or "BENDING" in guidance
+    assert "BEND ANGLE" in guidance or "90°" in guidance
+    assert ("FILET" in guidance) or ("FILLET" in guidance) or ("Z1" in guidance) or (
+        "WELD" in guidance
+    )
+    assert "WELDING" in guidance
+    assert "BENDING" in page_prompt and "WELDING" in page_prompt
+
+
+def test_process_auto_detected_from_drawing_markers():
+    """The PROCESS field is auto-generated from bending/welding markers."""
+    from app.pipeline.process_detector import detect_processes_from_text
+
+    # Bending: bend radius/angle callouts.
+    assert "bending" in detect_processes_from_text("BEND R5 90 DEG")
+    assert "bending" in detect_processes_from_text("BEND ALLOWANCE 2")
+    # Welding: fillet/weld symbols such as z1, z2, a5.
+    assert "welding" in detect_processes_from_text("WELD NOTE, FILLET Z1 Z2")
+    assert "welding" in detect_processes_from_text("FILLET WELD A5")
+    # Known processes from their words.
+    assert "laser cutting" in detect_processes_from_text("laser cutting")
+    assert "tapping" in detect_processes_from_text("TAP M4")
+    # No guesswork from ordinary dimensions / labels.
+    assert detect_processes_from_text("R12 dimension only") == []
+    assert detect_processes_from_text("4 holes M8 counterbore") == []
 
 
 def test_orientation_rules_are_in_the_prompt():
@@ -471,8 +505,11 @@ def test_orientation_rules_are_in_the_prompt():
     assert "DEVELOPMENT" in flat and "FLAT PATTERN" in flat, (
         "the prompt must forbid development/flat-pattern dimensions"
     )
-    assert "WIDTH IS OPPOSITE THE LENGTH" in flat
-    assert "Z AXIS" in flat, "height must be tied to the 3D model's Z axis"
+    assert "OPPOSITE" in flat and "PERPENDICULAR" in flat, (
+        "width must be perpendicular/opposite to length"
+    )
+    page = " ".join(pe.PAGE_PROMPT.split()).upper()
+    assert "Z AXIS" in page, "height must be tied to the 3D model's Z axis"
 
 
 def test_development_view_dimensions_never_fill_lwh():
@@ -605,11 +642,12 @@ def test_api_round_trip():
     with open(get_pdf(), "rb") as handle:
         upload = client.post(
             "/api/part-report/upload",
-            files={"file": ("drawing.pdf", handle, "application/pdf")},
+            files=[("files", ("drawing.pdf", handle, "application/pdf"))],
         )
     assert upload.status_code == 200, upload.text
     document_id = upload.json()["document_id"]
     assert upload.json()["page_count"] == 3
+    assert upload.json()["file_count"] == 1
 
     # Guards that stop ambiguous input reaching the pipeline.
     assert client.post("/api/part-report/analyze", json={
