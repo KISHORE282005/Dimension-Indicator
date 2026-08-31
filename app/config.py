@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+    #: Full public running URL (e.g. http://127.0.0.1:8000 or a LAN/domain
+    #: address the browser and other machines use to reach this server).
+    API_URL: str = "http://127.0.0.1:8000"
     STREAMLIT_PORT: int = 8501
 
     TOLERANCE_PRECISION: int = 4

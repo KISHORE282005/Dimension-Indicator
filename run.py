@@ -24,6 +24,7 @@ def _banner() -> None:
     print(f"  {settings.APP_NAME} v{settings.APP_VERSION}")
     print(f"  Interface:  http://{host}:{settings.API_PORT}/")
     print(f"  API docs:   http://{host}:{settings.API_PORT}/docs")
+    print(f"  Running at: {settings.API_URL}/")
     print(f"  Model:      {settings.GEMINI_MODEL}")
 
     if not _key_configured():

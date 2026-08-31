@@ -1,36 +1,38 @@
 # --- Core web stack ---------------------------------------------------------
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
+# Versions are pinned (==) so every machine installs the identical runtime
+# regardless of its own Python environment.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+pydantic==2.13.4
+pydantic-settings==2.6.1
 
 # --- PDF & image processing -------------------------------------------------
-PyMuPDF>=1.23.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
-numpy>=1.24.0
+PyMuPDF==1.28.2
+opencv-python==4.13.0.92
+Pillow==11.3.0
+numpy==1.26.4
 
 # --- Vision-language model --------------------------------------------------
 # Current SDK. The legacy `google-generativeai` package is still supported by
 # app/pipeline/gemini_client.py as a fallback, but is no longer the default.
-google-genai>=1.0.0
+google-genai==2.10.0
 
 # --- Report generation ------------------------------------------------------
-pandas>=2.0.0
-openpyxl>=3.1.0
-reportlab>=4.0.0
+pandas==2.2.3
+openpyxl==3.1.5
+reportlab==5.0.0
 
 # --- OCR (large download) --------------------------------------------------
 # Without these the app falls back to the PDF's own vector text layer, which is
 # exact for CAD-exported drawings but empty for scanned ones. Install to handle
 # scanned drawings.
-paddlepaddle>=2.5.0
-paddleocr>=2.7.0
+paddlepaddle==3.0.0
+paddleocr==2.9.1
 
 # --- Custom symbol detection (optional) -------------------------------------
 # Needed only when YOLO_ENABLE_CUSTOM=true and trained weights are supplied.
 # ultralytics>=8.0.0
 
 # --- Utilities --------------------------------------------------------------
-python-dotenv>=1.0.0
+python-dotenv==1.0.1
