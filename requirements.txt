@@ -9,7 +9,7 @@ pydantic-settings==2.6.1
 
 # --- PDF & image processing -------------------------------------------------
 PyMuPDF==1.28.2
-opencv-python==4.13.0.92
+opencv-python==4.10.0.84
 Pillow==11.3.0
 numpy==1.26.4
 
