@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Optional
 
 import cv2
@@ -168,9 +169,23 @@ class OCREngine:
         image: np.ndarray,
         page_number: int = 1,
         min_confidence: float = 0.3,
+        run_log: Any = None,
     ) -> list[OCRResult]:
-        """Recognise all text in a page image."""
+        """Recognise all text in a page image.
+
+        When ``run_log`` (an :class:`OCRRunLog`) is supplied, the raw detector
+        output and every kept region are recorded so a deployed server's OCR
+        behaviour can be inspected from a file.
+        """
         if self.ocr is None:
+            if run_log is not None:
+                run_log.add_ocr_page(
+                    page_number,
+                    raw=None,
+                    kept=[],
+                    engine=self.engine_name,
+                    note="OCR engine unavailable; no recognition performed",
+                )
             return []
 
         # PaddleOCR's inference backend aborts (SIGSEGV / "Unknown exception")
@@ -179,11 +194,21 @@ class OCREngine:
         # boxes are scaled back to page coordinates afterwards.
         small, scale = self._fit_for_ocr(image)
 
+        started = time.monotonic()
+        raw = None
         try:
             with _ocr_lock:
                 raw = self._invoke(small)
         except Exception as e:
             logger.error("OCR failed on page %d: %s", page_number, e)
+            if run_log is not None:
+                run_log.add_ocr_page(
+                    page_number,
+                    raw=None,
+                    kept=[],
+                    engine=self.engine_name,
+                    note=f"OCR raised exception: {e}",
+                )
             return []
 
         items = self._normalise_output(raw, page_number)
@@ -201,6 +226,16 @@ class OCREngine:
             min_confidence,
             _ocr_flavour,
         )
+
+        if run_log is not None:
+            run_log.add_ocr_page(
+                page_number,
+                raw=raw,
+                kept=kept,
+                dropped=len(items) - len(kept),
+                engine=self.engine_name,
+                elapsed_seconds=time.monotonic() - started,
+            )
         return kept
 
     @staticmethod

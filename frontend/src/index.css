@@ -585,6 +585,71 @@ body {
   vertical-align: middle;
 }
 
+/* Each report cell is an editable input so the user can correct values that
+   were not found on the drawing. */
+.report-cell {
+  position: relative;
+  padding: 0 !important;
+}
+
+.cell-input {
+  width: 100%;
+  height: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cell-input:hover {
+  border-color: var(--border);
+}
+
+.cell-input:focus {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  background: #fff;
+  color: #1f2937;
+  height: auto;
+}
+
+.cell-edited {
+  background: #d9eed2;
+  color: #155724;
+  font-weight: 600;
+}
+
+.cell-note {
+  position: absolute;
+  left: 8px;
+  top: calc(100% + 6px);
+  z-index: 20;
+  background: #155724;
+  color: #fff;
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 7px 10px;
+  max-width: 320px;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  white-space: normal;
+}
+
+.cell-note::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: -6px;
+  border: 6px solid transparent;
+  border-bottom-color: #155724;
+}
+
 .cell-filled {
   background: #e2efda;
   color: #1e5b2a;
@@ -642,6 +707,11 @@ body {
 .swatch-missing {
   background: #fce4e4;
   border-color: #c74b4b;
+}
+
+.swatch-edited {
+  background: #d9eed2;
+  border-color: #56a06a;
 }
 
 .download-actions.no-margin {

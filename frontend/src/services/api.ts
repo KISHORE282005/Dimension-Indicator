@@ -64,6 +64,14 @@ export const getPartResult = async (
 export const getPartExcelUrl = (jobId: string) =>
   `/api/part-report/excel/${jobId}`;
 
+export const updatePartCells = async (
+  jobId: string,
+  edits: { part_no: string; column: string; value: string }[]
+): Promise<{ job_id: string; applied: number }> => {
+  const { data } = await api.post(`/part-report/edit/${jobId}`, edits);
+  return data;
+};
+
 export const uploadFile = async (file: File): Promise<UploadResponse> => {
   const formData = new FormData();
   formData.append("file", file);

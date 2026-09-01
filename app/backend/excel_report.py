@@ -49,6 +49,8 @@ MISSING_FG = "9C1F1F"
 FILLED_BG = "E2EFDA"
 FILLED_FG = "1E5B2A"
 CONFIRMED_FG = "1E5B2A"
+EDIT_BG = "D9EED2"
+EDIT_FG = "155724"
 MUTED = "595959"
 
 THIN = Side(style="thin", color="B4C6E7")
@@ -217,6 +219,7 @@ class ExcelReportWriter:
         legend.value = (
             "Cell shading -  no fill: value as entered by user  |  "
             "green: filled in from the drawing  |  "
+            "bright green: corrected by you after analysis  |  "
             "amber: your entry differs from the drawing (your value kept)  |  "
             "red: not supplied and not detected.  "
             "Hover any shaded cell for the page reference."
@@ -293,7 +296,10 @@ class ExcelReportWriter:
             return
 
         status = report_cell.status
-        if status == ValueStatus.CONFLICT:
+        if status == ValueStatus.USER_EDITED:
+            cell.fill = PatternFill("solid", start_color=EDIT_BG, end_color=EDIT_BG)
+            cell.font = Font(size=10, name="Calibri", color=EDIT_FG, bold=True)
+        elif status == ValueStatus.CONFLICT:
             cell.fill = PatternFill("solid", start_color=CONFLICT_BG, end_color=CONFLICT_BG)
             cell.font = Font(size=10, name="Calibri", color=CONFLICT_FG, bold=True)
         elif status == ValueStatus.MISSING:

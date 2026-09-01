@@ -11,7 +11,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { useWorkspace } from "../context/WorkspaceContext";
-import { getPartExcelUrl } from "../services/api";
+import { getPartExcelUrl, updatePartCells } from "../services/api";
 import type { CellStatus, DrawingFinding } from "../types";
 
 function formatSize(bytes: number): string {
@@ -28,9 +28,16 @@ function cellClass(status: CellStatus): string {
       return "cell-conflict";
     case "missing":
       return "cell-missing";
+    case "user_edited":
+      return "cell-edited";
     default:
       return "";
   }
+}
+
+//: Key that uniquely identifies a single report cell in local edit state.
+function cellKey(partNo: string, column: string): string {
+  return `${partNo}::${column}`;
 }
 
 const DROPZONE_ACCEPT = {
@@ -52,6 +59,7 @@ export default function UploadPage() {
     detail,
     error,
     result,
+    refreshResult,
     handleFiles,
     runAnalysis,
     reset,
@@ -59,6 +67,41 @@ export default function UploadPage() {
   const [useVlm, setUseVlm] = useState(true);
   const [elapsed, setElapsed] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+
+  //: User overrides for report cells, keyed by `partNo::column`. When a cell
+  //: differs from what the analysis produced, it is drawn green and shows a
+  //: note when clicked. `activeCell` holds the key of the cell whose note is
+  //: currently shown.
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [activeCell, setActiveCell] = useState<string | null>(null);
+
+  //: Persist any corrected cells to the backend (which regenerates the Excel)
+  //: then pull the refreshed result so the saved green state is shown.
+  const saveEdits = useCallback(async () => {
+    if (!jobId || !result) return;
+    const originals = new Map(
+      result.table.rows.flatMap((row) =>
+        result.table.columns.map((col) => [
+          cellKey(row.part_no, col),
+          row.cells[col]?.value ?? "",
+        ] as [string, string])
+      )
+    );
+    const changed = Object.entries(edits)
+      .filter(([key, value]) => originals.get(key) !== value)
+      .map(([key, value]) => {
+        const [partNo, column] = key.split("::");
+        return { part_no: partNo, column, value };
+      });
+    if (changed.length === 0) return;
+    try {
+      await updatePartCells(jobId, changed);
+      setEdits({});
+      await refreshResult();
+    } catch {
+      // Keep the edits local so the user sees green; a later save will retry.
+    }
+  }, [jobId, result, edits, refreshResult]);
 
   useEffect(() => {
     if (phase !== "analyzing") {
@@ -366,12 +409,47 @@ export default function UploadPage() {
                       {row.values.map((val, idx) => {
                         const col = result.table.columns[idx];
                         const cell = row.cells[col];
+                        const key = cellKey(row.part_no, col);
+                        const edited =
+                          key in edits && edits[key].trim() !== "" &&
+                          edits[key] !== val;
+                        const displayValue = key in edits ? edits[key] : val;
                         return (
-                          <td
-                            key={col}
-                            className={cell ? cellClass(cell.status) : ""}
-                          >
-                            {val}
+                          <td key={col} className="report-cell">
+                            <input
+                              className={`cell-input ${
+                                edited ? "cell-edited" : cell ? cellClass(cell.status) : ""
+                              }`}
+                              value={displayValue}
+                              onClick={() => setActiveCell(key)}
+                              onFocus={() => setActiveCell(key)}
+                              onBlur={() => {
+                                setActiveCell(null);
+                                if (key in edits && edits[key] !== val) {
+                                  void saveEdits();
+                                }
+                              }}
+                              onChange={(e) =>
+                                setEdits((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }}
+                            />
+                            {activeCell === key && (
+                              <span className="cell-note">
+                                {edited || cell?.status === "user_edited"
+                                  ? "Edited by you — saved and shown green in the downloaded Excel."
+                                  : cell?.status === "missing"
+                                  ? "Not detected on the drawing — click to type a value, it will turn green."
+                                  : "Click to edit — changes are saved green."}
+                              </span>
+                            )}
                           </td>
                         );
                       })}
@@ -401,6 +479,9 @@ export default function UploadPage() {
               </span>
               <span>
                 <i className="swatch swatch-missing" /> Not detected
+              </span>
+              <span>
+                <i className="swatch swatch-edited" /> Edited by you
               </span>
             </div>
           </section>

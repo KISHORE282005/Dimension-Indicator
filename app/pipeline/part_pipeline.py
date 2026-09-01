@@ -28,6 +28,7 @@ from app.models.part_schemas import (
 )
 from app.pipeline.document_processor import DocumentProcessor
 from app.pipeline.ocr_engine import OCREngine
+from app.pipeline.ocr_log import OCRRunLog
 from app.pipeline.part_extractor import PartExtractor
 from app.pipeline.process_detector import process_evidence_for_parts
 from app.pipeline.symbol_detector import SymbolDetector
@@ -76,12 +77,21 @@ class PartReportPipeline:
         use_ocr: bool = True,
         ocr_min_confidence: float = 0.3,
         progress: Optional[ProgressCallback] = None,
+        run_log: Optional[OCRRunLog] = None,
     ) -> PartReportResult:
         file_path = Path(file_path)
         started = time.time()
 
         supplied = [p for p in parts if p.has_any_value()]
         discovery_mode = not supplied
+
+        if run_log is not None:
+            run_log.setup(
+                document_id=document_id,
+                filename=file_path.name,
+                ocr_engine=self.ocr_engine.engine_name,
+                ocr_vlm_discovery_mode=discovery_mode,
+            )
 
         result = PartReportResult(
             document_id=document_id,
@@ -165,6 +175,7 @@ class PartReportPipeline:
                         page.processed_image,
                         page_number=page.page_number,
                         min_confidence=ocr_min_confidence,
+                        run_log=run_log,
                     )
                     analysis.ocr_engine = self.ocr_engine.engine_name
                 if not ocr_results and page.text_blocks:
@@ -176,6 +187,12 @@ class PartReportPipeline:
             ocr_text = self.ocr_engine.to_reading_order_text(ocr_results)
             analysis.ocr_regions = len(ocr_results)
             analysis.ocr_text_length = len(ocr_text)
+            if run_log is not None:
+                run_log.add_page_text(
+                    page.page_number,
+                    ocr_text,
+                    source=analysis.ocr_engine,
+                )
 
             symbol_findings = self.symbol_detector.detect(page)
             all_findings.extend(symbol_findings)

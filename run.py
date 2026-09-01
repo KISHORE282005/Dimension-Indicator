@@ -1,6 +1,7 @@
 """Main entry point for the Engineering Drawing Analysis System."""
 
 import logging
+from logging.handlers import RotatingFileHandler
 
 import uvicorn
 
@@ -10,6 +11,31 @@ logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
+
+def _configure_file_logging() -> None:
+    """Mirror all application logs to a rotating file on disk.
+
+    In a deployed environment the process is often daemonised and its console
+    output is lost or rotated away by the supervisor, so a per-run OCR debug
+    log alone is not enough to reconstruct a failure. This writes the standard
+    module logs (OCR init, per-page counts, VLM/Gemini calls, pipeline stages,
+    job failures) to ``logs/app.log`` with a rolling max of 10 x 5 MB.
+    """
+    settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = settings.LOG_DIR / "app.log"
+    handler = RotatingFileHandler(
+        str(log_file), maxBytes=5 * 1024 * 1024, backupCount=10, encoding="utf-8"
+    )
+    handler.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    root = logging.getLogger()
+    root.addHandler(handler)
+
+
+_configure_file_logging()
 
 _PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "your_api_key_here", "changeme", "none"}
 

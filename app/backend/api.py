@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.config import settings
 from app.models.database import DatabaseManager
 from app.models.schemas import DocumentAnalysisResult
+from app.pipeline.ocr_log import OCRRunLog
 from app.pipeline.orchestrator import PipelineOrchestrator
 from app.backend.report_generator import ReportGenerator
 from app.backend.part_routes import router as part_report_router
@@ -150,11 +151,13 @@ async def analyze_document(
     orchestrator.set_progress_callback(progress_callback)
 
     try:
-        result = orchestrator.analyze(
-            file_path=str(file_path),
-            use_vlm=use_vlm,
-            ocr_min_confidence=ocr_min_confidence,
-        )
+        with OCRRunLog(document_id=document_id, filename=file_path.name) as run_log:
+            result = orchestrator.analyze(
+                file_path=str(file_path),
+                use_vlm=use_vlm,
+                ocr_min_confidence=ocr_min_confidence,
+                run_log=run_log,
+            )
         db.save_analysis(result)
         _progress[document_id] = {"stage": "complete", "progress": 1.0}
 

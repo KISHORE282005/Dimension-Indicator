@@ -24,9 +24,11 @@ from app.config import settings
 from app.models.part_schemas import (
     REPORT_COLUMNS,
     AnalysisRequest,
+    CellEdit,
     PartInput,
     PartReportResult,
 )
+from app.pipeline.ocr_log import OCRRunLog
 from app.pipeline.part_pipeline import PartReportPipeline
 
 logger = logging.getLogger(__name__)
@@ -378,14 +380,19 @@ def _run_analysis(
 
     try:
         job = _get_job(job_id) or {}
-        result = get_pipeline().run(
-            file_path=file_path,
-            parts=parts,
+        with OCRRunLog(
             document_id=job.get("document_id", ""),
-            use_vlm=use_vlm,
-            use_ocr=use_ocr,
-            progress=progress,
-        )
+            job_id=job_id,
+        ) as run_log:
+            result = get_pipeline().run(
+                file_path=file_path,
+                parts=parts,
+                document_id=job.get("document_id", ""),
+                use_vlm=use_vlm,
+                use_ocr=use_ocr,
+                progress=progress,
+                run_log=run_log,
+            )
 
         try:
             _result_path(job_id).write_text(
@@ -483,6 +490,53 @@ async def result(job_id: str) -> dict:
         "warnings": report.warnings,
         "errors": report.errors,
         "row_warnings": {row.part_no: row.warnings for row in report.rows},
+        "stats": {
+            "conflicts": report.conflict_count(),
+            "filled_from_drawing": report.filled_count(),
+            "not_detected": report.missing_count(),
+        },
+    }
+
+
+@router.post("/edit/{job_id}")
+async def edit_cells(job_id: str, edits: list[CellEdit]) -> dict:
+    """Apply operator corrections to report cells and refresh the Excel file.
+
+    The operator edits cells in the live table (typically ones shown red for
+    "not detected"). Each edit is applied to the cached result, the result is
+    re-saved, and the downloaded Excel file is regenerated so the corrected
+    values appear green when the user downloads it.
+    """
+    report = _load_result(job_id)
+    if report is None:
+        job = _get_job(job_id)
+        if job and job.get("status") in {"queued", "running"}:
+            raise HTTPException(409, "Analysis is still running.")
+        raise HTTPException(404, f"No result for job {job_id}.")
+
+    if edits:
+        report.apply_edits(edits)
+
+    # Persist the corrected result so it survives a restart.
+    try:
+        _result_path(job_id).write_text(
+            report.model_dump_json(indent=2), encoding="utf-8"
+        )
+    except Exception as e:
+        logger.warning("Could not cache edited result %s: %s", job_id, e)
+
+    # Regenerate the Excel so the edits show up green on download.
+    excel_path = None
+    try:
+        excel_path = _excel_writer.generate(report)
+    except Exception as e:
+        logger.exception("Excel regeneration failed for job %s", job_id)
+    _set_job(job_id, result=report,
+             excel_path=str(excel_path) if excel_path else None)
+
+    return {
+        "job_id": job_id,
+        "applied": len(edits),
         "stats": {
             "conflicts": report.conflict_count(),
             "filled_from_drawing": report.filled_count(),

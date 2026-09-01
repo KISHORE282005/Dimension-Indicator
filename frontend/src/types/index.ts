@@ -289,7 +289,8 @@ export type CellStatus =
   | "confirmed"
   | "conflict"
   | "filled"
-  | "missing";
+  | "missing"
+  | "user_edited";
 
 export interface ReportCell {
   column: string;

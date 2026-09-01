@@ -19,6 +19,9 @@ __pycache__/
 /uploads/
 /output/
 
+# Runtime logs (rotating app.log + per-job OCR debug logs)
+/logs/
+
 # Downloaded model weights.
 # WITHOUT the leading slash this also matched app/models/, silently excluding
 # the entire Python package (schemas.py, database.py, part_schemas.py) from

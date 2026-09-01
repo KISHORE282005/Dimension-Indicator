@@ -101,6 +101,7 @@ class ValueStatus(str, Enum):
     CONFLICT = "conflict"             # user supplied it, drawing disagrees
     FILLED_FROM_DRAWING = "filled"    # user left blank, drawing supplied it
     MISSING = "missing"               # nobody supplied it
+    USER_EDITED = "user_edited"       # user corrected it after analysis
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +163,23 @@ class AnalysisRequest(BaseModel):
     parts: list[PartInput] = Field(default_factory=list)
     use_vlm: bool = True
     use_ocr: bool = True
+
+
+class CellEdit(BaseModel):
+    """A single user correction to one report cell.
+
+    Sent back after the operator edits a value (typically one that was shown
+    red for "not detected") so the corrected value can be persisted and written
+    green into the downloaded Excel file.
+    """
+
+    part_no: str
+    column: str
+    value: str
+
+    def normalised_part_no(self) -> str:
+        """Reduce PART NO for matching (uppercase, alphanumerics only)."""
+        return "".join(ch for ch in (self.part_no or "") if ch.isalnum()).upper()
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +260,10 @@ class PartReportRow(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     discovered: bool = False
 
+    def normalised_part_no(self) -> str:
+        """Reduce PART NO for matching (uppercase, alphanumerics only)."""
+        return "".join(ch for ch in (self.part_no or "") if ch.isalnum()).upper()
+
     def ordered_values(self) -> list[str]:
         return [
             self.cells[col].value if col in self.cells else NOT_AVAILABLE
@@ -308,8 +330,39 @@ class PartReportResult(BaseModel):
             if cell.status == ValueStatus.MISSING
         )
 
-    def filled_count(self) -> int:
-        return sum(
+    def apply_edits(self, edits: list["CellEdit"]) -> None:
+        """Overwrite report cells with operator corrections.
+
+        Each edit locates the row by PART NO and the cell by report column,
+        stores the new value, and marks the cell as user-edited so it is drawn
+        green in the table and in the Excel file. The original drawing value is
+        preserved in ``drawing_value`` for the audit trail.
+        """
+        rows_by_part = {
+            row.normalised_part_no(): row for row in self.rows
+        }
+        for edit in edits:
+            row = rows_by_part.get(edit.normalised_part_no())
+            if row is None:
+                continue
+            cell = row.cells.get(edit.column)
+            if cell is None:
+                cell = ReportCell(column=edit.column)
+                row.cells[edit.column] = cell
+            was_missing = cell.status == ValueStatus.MISSING
+            if not cell.drawing_value and cell.source == ValueSource.DRAWING:
+                cell.drawing_value = cell.value
+            cell.value = edit.value.strip() or edit.value
+            cell.source = ValueSource.USER
+            cell.status = ValueStatus.USER_EDITED
+            cell.user_value = cell.value
+            if was_missing or cell.note is None:
+                cell.note = (
+                    "Corrected by the operator after analysis. "
+                    "This value overrides what was detected on the drawing."
+                )
+
+    def filled_count(self) -> int:        return sum(
             1
             for row in self.rows
             for cell in row.cells.values()

@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     OUTPUT_DIR: Path = BASE_DIR / "output"
     MODELS_DIR: Path = BASE_DIR / "models"
     DATABASE_DIR: Path = BASE_DIR / "database"
+    LOG_DIR: Path = BASE_DIR / "logs"
+
+    #: When true, every analysis run writes a complete, human-readable JSON
+    #: debug log under ``LOG_DIR/jobs/<job_id>.ocr.json`` describing exactly how
+    #: OCR ran and what it returned for each page. Useful for diagnosing
+    #: deployed environments where the console is unreachable. Set
+    #: ``OCR_DEBUG_LOG=false`` to disable.
+    OCR_DEBUG_LOG: bool = True
+    #: Keep the last N per-job OCR debug logs on disk (~600 KB each).
+    OCR_DEBUG_LOG_KEEP: int = 50
 
     PDF_RENDER_DPI: int = 300
     MAX_IMAGE_SIZE: int = 4096
@@ -70,3 +80,5 @@ settings = Settings()
 settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 settings.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 settings.DATABASE_DIR.mkdir(parents=True, exist_ok=True)
+settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+(settings.LOG_DIR / "jobs").mkdir(parents=True, exist_ok=True)

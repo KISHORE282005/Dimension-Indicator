@@ -37,6 +37,7 @@ interface WorkspaceState {
   detail: string;
   error: string | null;
   result: PartReportResult | null;
+  refreshResult: () => Promise<void>;
   handleFiles: (files: File[]) => void;
   runAnalysis: (useVlm: boolean) => void;
   reset: () => void;
@@ -146,6 +147,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [documentId, stopPolling]
   );
 
+  const refreshResult = useCallback(async () => {
+    if (!jobId) return;
+    try {
+      const r = await getPartResult(jobId);
+      setResult(r);
+    } catch {
+      // keep the existing result if the refresh fails
+    }
+  }, [jobId]);
+
   const reset = useCallback(() => {
     stopPolling();
     setPhase("idle");
@@ -177,6 +188,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         detail,
         error,
         result,
+        refreshResult,
         handleFiles,
         runAnalysis,
         reset,

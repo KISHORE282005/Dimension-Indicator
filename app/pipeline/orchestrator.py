@@ -36,6 +36,7 @@ from app.models.schemas import (
 )
 from app.pipeline.document_processor import DocumentProcessor, ProcessedPage
 from app.pipeline.ocr_engine import OCREngine
+from app.pipeline.ocr_log import OCRRunLog
 from app.pipeline.vlm_engine import VLMEngine
 
 logger = logging.getLogger(__name__)
@@ -64,10 +65,19 @@ class PipelineOrchestrator:
         file_path: str | Path,
         use_vlm: bool = True,
         ocr_min_confidence: float = 0.3,
+        run_log: Optional[OCRRunLog] = None,
     ) -> DocumentAnalysisResult:
         """Run the full analysis pipeline on a document."""
         file_path = Path(file_path)
         start_time = time.time()
+
+        if run_log is not None:
+            run_log.setup(
+                document_id="",
+                filename=file_path.name,
+                ocr_engine=self.ocr_engine.engine_name,
+                ocr_vlm_discovery_mode=True,
+            )
 
         result = DocumentAnalysisResult(
             filename=file_path.name,
@@ -100,8 +110,13 @@ class PipelineOrchestrator:
                 page.processed_image,
                 page_number=page.page_number,
                 min_confidence=ocr_min_confidence,
+                run_log=run_log,
             )
             ocr_text = "\n".join(r.text for r in ocr_results)
+            if run_log is not None:
+                run_log.add_page_text(
+                    page.page_number, ocr_text, source=self.ocr_engine.engine_name
+                )
 
             # VLM analysis (if enabled and available)
             ai_interp = None
