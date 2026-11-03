@@ -66,23 +66,36 @@ class PipelineOrchestrator:
         use_vlm: bool = True,
         ocr_min_confidence: float = 0.3,
         run_log: Optional[OCRRunLog] = None,
+
+
+        document_id: str = "",
     ) -> DocumentAnalysisResult:
-        """Run the full analysis pipeline on a document."""
+        """Run the full analysis pipeline on a document.
+
+        ``document_id`` should be the id returned by the upload endpoint so the
+        stored result can be fetched back under that same id. If empty, a fresh
+        UUID is generated (the Pydantic default), which decouples the stored
+        result from the id the caller knows -- pass it for round-trip lookups.
+        """
         file_path = Path(file_path)
         start_time = time.time()
 
         if run_log is not None:
             run_log.setup(
-                document_id="",
+                document_id=document_id,
                 filename=file_path.name,
                 ocr_engine=self.ocr_engine.engine_name,
                 ocr_vlm_discovery_mode=True,
             )
 
+        kwargs = {}
+        if document_id:
+            kwargs["document_id"] = document_id
         result = DocumentAnalysisResult(
             filename=file_path.name,
             file_path=str(file_path),
             total_pages=0,
+            **kwargs,
         )
 
         # Stage 1: Document processing

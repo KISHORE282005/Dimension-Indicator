@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import settings
+from app.diagnostics import run_diagnostics
 from app.models.database import DatabaseManager
 from app.models.schemas import DocumentAnalysisResult
 from app.pipeline.ocr_log import OCRRunLog
@@ -102,6 +103,18 @@ async def system_status():
     }
 
 
+@app.get("/api/diagnostics")
+async def diagnostics():
+    """Deep deployment self-check.
+
+    Probes OCR/Paddle imports, Gemini key + model reachability, the frontend
+    build, writable runtime directories and env config, returning one verdict
+    and one fix per item. Use this on a deployed server instead of guessing why
+    it differs from your laptop. Equivalent to ``python -m app.diagnostics``.
+    """
+    return run_diagnostics()
+
+
 # ------------------------------------------------------------------
 # File upload & analysis
 # ------------------------------------------------------------------
@@ -158,6 +171,8 @@ async def analyze_document(
                 ocr_min_confidence=ocr_min_confidence,
                 run_log=run_log,
             )
+            logger.info("Analysis completed successfully: %s", result.document_id)
+
         db.save_analysis(result)
         _progress[document_id] = {"stage": "complete", "progress": 1.0}
 
@@ -353,7 +368,7 @@ async def get_page_image(document_id: str, page_number: int):
         raise HTTPException(404, "Document not found")
 
     try:
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(str(upload_files[0]))
         if page_number < 1 or page_number > len(doc):
             raise HTTPException(400, f"Invalid page number: {page_number}")

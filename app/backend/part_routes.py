@@ -227,7 +227,7 @@ def _count_pages(path: Path, ext: str) -> int:
     if ext != ".pdf":
         return 1
     try:
-        import fitz
+        import pymupdf as fitz
 
         with fitz.open(str(path)) as doc:
             return len(doc)
@@ -243,7 +243,7 @@ def _combine_uploads(folder: Path, document_id: str) -> Path:
     Returns the path of the combined document, named ``<id>.combined.pdf`` so
     the existing ``<id>.*`` globs pick it up for analysis and preview.
     """
-    import fitz
+    import pymupdf as fitz
 
     combined = Path(settings.UPLOAD_DIR) / f"{document_id}.combined.pdf"
     files = sorted(
@@ -589,7 +589,7 @@ async def page_image(document_id: str, page_number: int) -> FileResponse:
         return FileResponse(str(cache), media_type="image/png")
 
     try:
-        import fitz
+        import pymupdf as fitz
 
         with fitz.open(str(source)) as doc:
             if page_number < 1 or page_number > len(doc):

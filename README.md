@@ -23,6 +23,11 @@ python run.py
 Open **http://localhost:8000** — the whole interface is served by FastAPI. There
 is no build step and no second server.
 
+> **On a server**, open `http://<server-ip>:8000` — set `API_URL` in `.env` to
+> that address so links in the UI are correct. The UI calls the API with a
+> relative `/api` path, so the browser always talks to whichever host served
+> the page.
+
 > **The Gemini API key is required.** Without it the app still runs and still
 > produces a valid Excel file, but every column contains only what you typed —
 > nothing is read from the drawing. The banner at the top of the page tells you
@@ -79,6 +84,7 @@ analysis, since they would make attribution ambiguous.
 | GET    | `/api/part-report/result/{job_id}`                 | Table, findings, warnings, stats                      |
 | GET    | `/api/part-report/excel/{job_id}`                  | Download the`.xlsx`                                 |
 | GET    | `/api/part-report/page-image/{document_id}/{page}` | Rendered page PNG                                     |
+| GET    | `/api/diagnostics`                                 | Deep deployment self-check (same as diagnostics CLI)  |
 
 ### Modules
 
@@ -87,7 +93,9 @@ app/models/part_schemas.py      fixed column contract, provenance types
 app/pipeline/gemini_client.py   SDK-agnostic Gemini wrapper
 app/pipeline/part_extractor.py  per-page extraction + part attribution
 app/pipeline/part_pipeline.py   render -> OCR -> VLM -> resolve, every page
+app/pipeline/ocr_log.py         per-job OCR debug log (logs/jobs/*.ocr.json)
 app/pipeline/symbol_detector.py YOLO11 hook (inert until weights supplied)
+app/diagnostics.py              deployment self-check (CLI + /api/diagnostics)
 app/engine/report_resolver.py   the value-decision policy above
 app/backend/excel_report.py     the four-sheet workbook writer
 app/backend/part_routes.py      REST API
@@ -96,17 +104,19 @@ app/ui/                         the interface (no build step)
 
 ### Optional: OCR for scanned drawings
 
-PaddleOCR is not installed by default — it is a large download. Without it the
-app reads the PDF's own vector text layer, which is *exact* for CAD-exported
-drawings (they are the glyphs the CAD package wrote, not a recognition guess).
-Install it only if you process **scanned** or image-only drawings:
+`requirements.txt` installs PaddleOCR (`paddlepaddle`, `paddleocr`). If they
+fail on your platform, or you omit them, the app degrades to the PDF's own
+vector text layer, which is *exact* for CAD-exported drawings (they are the
+glyphs the CAD package wrote, not a recognition guess). Install it manually only
+if your server skipped it and you process **scanned** or image-only drawings:
 
 ```bash
 pip install paddlepaddle paddleocr
 ```
 
 Both the 2.x and 3.x PaddleOCR APIs are supported; the correct one is detected
-at runtime.
+at runtime. `python -m app.diagnostics` (or `/api/diagnostics`) tells you whether
+OCR is live or silently falling back.
 
 ### Optional: custom YOLO11 symbol detection
 
@@ -220,25 +230,168 @@ npm run dev
 
 Frontend runs at `http://localhost:5173` and proxies API requests to the backend.
 
+---
+
+## Deploying: Laptop → Server checklist
+
+The server runs the **same single command** as the laptop (`python run.py`), and
+FastAPI serves the prebuilt React bundle from `frontend/dist` — no second server,
+no build step. Use this checklist to move from "works on my laptop" to a working
+server, then use **Diagnosing a broken server** below to find exactly where a
+deployed install differs.
+
+### 1. Ship the whole repo (including `frontend/dist`)
+
+`frontend/dist` **is git-tracked** and must be present on the server — it is the
+served UI. It is NOT rebuilt on the server. Check it exists:
+
+```bash
+test -f frontend/dist/index.html && echo "UI present"
+```
+
+If you re-edit the React code, rebuild locally and commit the new bundle:
+
+```bash
+cd frontend && npm install && npm run build && cd ..
+```
+
+### 2. Python runtime
+
+```bash
+python --version   # 3.10 or newer (3.12 recommended)
+python -m pip install -r requirements.txt
+```
+
+The pinned `requirements.txt` includes `paddlepaddle==3.0.0` and
+`paddleocr==2.9.1`. These are large and platform-sensitive — this is the most
+common place a server install breaks. If they fail to install, the app still
+starts but **falls back to the PDF's vector text layer** (exact for CAD PDFs,
+empty for scanned drawings).
+
+### 3. Configure `.env`
+
+```bash
+cp .env.example .env
+```
+
+Set at minimum:
+
+| Variable           | Purpose                                                                  |
+| ------------------ | ------------------------------------------------------------------------ |
+| `GEMINI_API_KEY` | Required for drawing analysis. Without it nothing is read from drawings. |
+| `API_HOST`       | `0.0.0.0` so other machines can connect (default).                     |
+| `API_PORT`       | Port to bind, e.g.`8000`.                                              |
+| `API_URL`        | Full public URL, e.g.`http://192.168.1.50:8000`.                       |
+| `DEBUG`          | `true` for verbose logs, `false` for a quieter server.               |
+
+### 4. First-run downloads
+
+On first analysis the server downloads PaddleOCR model weights into
+`~/.paddleocr` and may need outbound Internet/Gemini access. If the server is
+behind a firewall, allow HTTPS to Google (Gemini) and to the PaddleOCR model
+host, or pre-seed `~/.paddleocr` from a machine that already ran it.
+
+### 5. Writable runtime directories
+
+The app writes to `uploads/`, `output/`, `database/` and `logs/` at runtime.
+The server user must own them:
+
+```bash
+mkdir -p uploads output database logs
+chown -R "$USER" uploads output database logs
+```
+
+### 6. Firewall / port
+
+Allow inbound traffic on `API_PORT` (e.g. `sudo ufw allow 8000`). The server
+only needs one port open — it serves both UI and API.
+
+### 7. Start it
+
+```bash
+python run.py
+```
+
+Confirm it is up: open `http://<server-ip>:<port>/api/health` from the server
+(or another machine). A `healthy` status with `ocr_available` and
+`vlm_available` means it booted correctly.
+
+---
+
+## Diagnosing a broken server (instead of guessing)
+
+If it works on your laptop but not the server, run the built-in deployment
+self-check. It probes every deployment-sensitive component, reports each one as
+`ok`/not, plus a one-line `status`, `detail`, and the exact `fix`:
+
+```bash
+python -m app.diagnostics
+```
+
+On a running server you can also hit `GET /api/diagnostics` from any browser,
+which returns the same JSON. It checks:
+
+| Check             | Catches                                                         |
+| ----------------- | --------------------------------------------------------------- |
+| Config / env      | Missing/placeholder`GEMINI_API_KEY`, wrong `API_URL`/port   |
+| Python / platform | Wrong Python version or architecture                            |
+| Writable dirs     | `uploads/output/database/logs` not writable by the app user   |
+| Frontend dist     | `frontend/dist/index.html` missing (blank UI)                 |
+| Paddle imports    | `paddle`/`paddleocr` failed to import on this platform      |
+| OCR               | PaddleOCR unavailable → silent fallback to text layer          |
+| Gemini            | SDK missing or key unusable                                     |
+| Gemini model      | Configured`GEMINI_MODEL` 404s against this key (retired name) |
+
+The `verdict` is `healthy`, `degraded` (app serves UI + text-layer OCR but OCR
+is off), or `broken`.
+
+### Where to look for failures
+
+- **Blank UI / 404 on `/`** → `frontend/dist` missing or not shipped. Check
+  "Frontend dist", rebuild and re-deploy the bundle.
+- **App loads but nothing is read from drawings** → Gemini not ready
+  (`GEMINI_API_KEY`, SDK, or model name) — check the Gemini rows, then
+  `python -m app.pipeline.gemini_client` to list models your key can call.
+- **Scanned drawings yield no text** → OCR fell back to the text layer
+  (PaddleOCR missing or models not downloaded) — check "OCR" / "Paddle imports".
+- **Upload/analysis errors** → runtime directories not writable, or the worker
+  failed mid-run.
+
+### Logs
+
+The app writes to `logs/`:
+
+| File                        | Contents                                                                                                                                                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `logs/app.log`            | Rotating (10 × 5 MB) log of every module — OCR init, per-page counts, VLM calls, pipeline stages, job failures. Mirrors the console.                                                                           |
+| `logs/jobs/<id>.ocr.json` | One complete, human-readable JSON per analysis run: OCR engine config, raw detector output per page, every kept region (text/confidence/bbox), the reading-order text passed to the VLM, timing and drop counts. |
+
+The per-job OCR log is written by default (`OCR_DEBUG_LOG=true`); keep the last
+`OCR_DEBUG_LOG_KEEP` (default 50). Disable with `OCR_DEBUG_LOG=false` in `.env`.
+On a deployed server where the console is unreachable, the OCR debug log is the
+record of exactly what PaddleOCR returned for each page and what was passed
+downstream.
+
 ## API Endpoints
 
-| Method     | Endpoint                             | Description                          |
-| ---------- | ------------------------------------ | ------------------------------------ |
-| `GET`    | `/api/health`                      | System health + OCR/VLM availability |
-| `POST`   | `/api/upload`                      | Upload a PDF or image                |
-| `POST`   | `/api/analyze/{doc_id}`            | Run full analysis pipeline           |
-| `GET`    | `/api/progress/{doc_id}`           | Get analysis progress                |
-| `GET`    | `/api/results/{doc_id}`            | Full analysis results                |
-| `GET`    | `/api/results/{doc_id}/summary`    | Extraction summary                   |
-| `GET`    | `/api/results/{doc_id}/page/{num}` | Single page results                  |
-| `GET`    | `/api/results/{doc_id}/items`      | Filter extracted items               |
-| `GET`    | `/api/results/{doc_id}/issues`     | Detected issues                      |
-| `GET`    | `/api/results/{doc_id}/validation` | Validation result                    |
-| `GET`    | `/api/reports/{doc_id}/pdf`        | Download PDF report                  |
-| `GET`    | `/api/reports/{doc_id}/excel`      | Download Excel report                |
-| `GET`    | `/api/pages/{doc_id}/{num}`        | Rendered page image                  |
-| `GET`    | `/api/history`                     | List previous analyses               |
-| `DELETE` | `/api/history/{doc_id}`            | Delete an analysis                   |
+| Method     | Endpoint                             | Description                                |
+| ---------- | ------------------------------------ | ------------------------------------------ |
+| `GET`    | `/api/health`                      | System health + OCR/VLM availability       |
+| `GET`    | `/api/diagnostics`                 | Deployment self-check (8 probes + verdict) |
+| `POST`   | `/api/upload`                      | Upload a PDF or image                      |
+| `POST`   | `/api/analyze/{doc_id}`            | Run full analysis pipeline                 |
+| `GET`    | `/api/progress/{doc_id}`           | Get analysis progress                      |
+| `GET`    | `/api/results/{doc_id}`            | Full analysis results                      |
+| `GET`    | `/api/results/{doc_id}/summary`    | Extraction summary                         |
+| `GET`    | `/api/results/{doc_id}/page/{num}` | Single page results                        |
+| `GET`    | `/api/results/{doc_id}/items`      | Filter extracted items                     |
+| `GET`    | `/api/results/{doc_id}/issues`     | Detected issues                            |
+| `GET`    | `/api/results/{doc_id}/validation` | Validation result                          |
+| `GET`    | `/api/reports/{doc_id}/pdf`        | Download PDF report                        |
+| `GET`    | `/api/reports/{doc_id}/excel`      | Download Excel report                      |
+| `GET`    | `/api/pages/{doc_id}/{num}`        | Rendered page image                        |
+| `GET`    | `/api/history`                     | List previous analyses                     |
+| `DELETE` | `/api/history/{doc_id}`            | Delete an analysis                         |
 
 ## Extracted Data Categories
 

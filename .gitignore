@@ -7,11 +7,12 @@ __pycache__/
 .env
 .env.local
 .env.*.local
-
-
+*.md
 # Python venv
 .venv/
 
+# Local runtime database (schema/data drifts per machine; never commit it)
+/database/*.db
 
 # Uploads & output
 # Leading slash matters: these patterns are anchored to the repo root so they

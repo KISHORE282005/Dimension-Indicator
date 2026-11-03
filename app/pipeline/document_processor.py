@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz  # PyMuPDF (new module name)
+except ImportError:
+    import fitz  # PyMuPDF (legacy module name)
 import numpy as np
 from PIL import Image
 
